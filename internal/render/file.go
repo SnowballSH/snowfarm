@@ -20,3 +20,7 @@ const (
 	agentOwnedMode fs.FileMode = 0o600
 	rootOwner                  = "root"
 )
+
+// IsSymlink reports whether the applier must create Path as a symlink to
+// Content rather than write Content into it.
+func (f File) IsSymlink() bool { return f.Mode&fs.ModeSymlink != 0 }

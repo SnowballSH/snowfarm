@@ -77,7 +77,7 @@ func TestHermesGolden(t *testing.T) {
 					t.Fatalf("%s mode %v, want %v", rel, f.Mode.Perm(), wantMode)
 				}
 			}
-			for _, stale := range staleGoldens(t, a.Name, rendered) {
+			for _, stale := range staleGoldens(t, filepath.Join("testdata", "golden", a.Name), rendered) {
 				t.Fatalf("golden %s is no longer rendered", stale)
 			}
 		})
@@ -144,9 +144,8 @@ func TestHermesInvariants(t *testing.T) {
 	}
 }
 
-func staleGoldens(t *testing.T, agent string, rendered map[string]bool) []string {
+func staleGoldens(t *testing.T, root string, rendered map[string]bool) []string {
 	t.Helper()
-	root := filepath.Join("testdata", "golden", agent)
 	var stale []string
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {

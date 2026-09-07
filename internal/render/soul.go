@@ -1,22 +1,11 @@
 package render
 
 import (
-	"bytes"
-	"embed"
 	"fmt"
 	"slices"
-	"strings"
-	"text/template"
 
 	"github.com/SnowballSH/snowfarm/internal/roster"
 )
-
-//go:embed templates/*.tmpl
-var templateFS embed.FS
-
-var soulTemplates = template.Must(template.New("soul").
-	Funcs(template.FuncMap{"join": strings.Join}).
-	ParseFS(templateFS, "templates/*.tmpl"))
 
 type soulData struct {
 	Agent   roster.Agent
@@ -32,12 +21,11 @@ func Soul(r *roster.Roster, a roster.Agent) ([]byte, error) {
 	if a.Tier == roster.TierManager {
 		name = "soul-manager.tmpl"
 	}
-	var buf bytes.Buffer
-	data := soulData{Agent: a, Roster: r, Teams: teamsOf(r, a), Workers: teammateWorkers(r, a)}
-	if err := soulTemplates.ExecuteTemplate(&buf, name, data); err != nil {
-		return nil, fmt.Errorf("agent %q: render %s: %w", a.Name, name, err)
+	body, err := execute(name, soulData{Agent: a, Roster: r, Teams: teamsOf(r, a), Workers: teammateWorkers(r, a)})
+	if err != nil {
+		return nil, fmt.Errorf("agent %q: %w", a.Name, err)
 	}
-	return buf.Bytes(), nil
+	return body, nil
 }
 
 func teamsOf(r *roster.Roster, a roster.Agent) []roster.Team {

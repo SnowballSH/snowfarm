@@ -1,0 +1,60 @@
+#!/bin/sh
+set -eu
+case "${USER:-$(id -un)}" in farm-*) name="$(id -un | sed 's/^farm-//')" ;; *) echo "farm-unitctl: not a farm user" >&2; exit 2 ;; esac
+uid="$(id -u)"
+home="{{ .HomeRoot }}/${name}"
+export XDG_RUNTIME_DIR="/run/user/${uid}"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus"
+export HOME="${home}"
+export HERMES_HOME="${home}/.hermes/profiles/${name}"
+export HERMES_KANBAN_HOME="{{ .KanbanHome }}"
+export HERMES_KANBAN_WORKSPACES_ROOT="${HERMES_KANBAN_HOME}/kanban/workspaces"
+export HERMES_KANBAN_ATTACHMENTS_ROOT="${HERMES_KANBAN_HOME}/kanban/attachments"
+export HERMES_KANBAN_DISPATCH_IN_GATEWAY=false
+export HERMES_WRITE_SAFE_ROOT="${home}"
+export HERMES_REDACT_SECRETS=true
+umask 0007
+verb="${1:-}"; [ $# -gt 0 ] && shift
+case "${verb}" in
+  gateway)
+    case "${1:-}" in start|stop|restart|is-active|show) exec systemctl --user "$@" hermes-gateway.service ;; *) exit 2 ;; esac ;;
+  run-dispatch|run-maintenance)
+    # run-dispatch is a SPAWN pass (--max 1); run-maintenance is a
+    # MAINTENANCE-ONLY pass (--max 0): it runs enforce_max_runtime, reclaim and
+    # todo->ready promotion from the worker's own UID but spawns NOTHING. It
+    # does not classify worker exits here -- Hermes' detect_crashed_workers
+    # reads _recent_worker_exits, filled only by waitpid on the caller's own
+    # children, and a farm worker is systemd's child, not the pass's; the guard
+    # reads the run unit's exit status and handles exit 75 itself.
+    # Housekeeping passes MUST use run-maintenance, never run-dispatch: a
+    # run-dispatch housekeeping pass can spawn if the worker's current card
+    # finished between the guard's decision and the pass executing, or while
+    # dispatch is paused. --max 0 removes that race by construction.
+    case "${verb}" in run-dispatch) max=1 ;; run-maintenance) max=0 ;; esac
+    # shellcheck source=/dev/null
+    . "/usr/local/lib/snowfarm/limits/${name}"
+    export HERMES_MAX_ITERATIONS="${RUN_MAX_ITERATIONS}"
+    unit="snowfarm-run-${name}-$(date +%s%N).service"
+    printf '%s\n' "${unit}"
+    exec systemd-run --user --quiet --collect --unit="${unit}" \
+      -p ExitType=cgroup -p "MemoryMax=${RUN_MEMORY_MAX}" -p MemorySwapMax=0 -p "TasksMax=${RUN_TASKS_MAX}" \
+      -p TimeoutStopSec=30 -p UMask=0007 -p NoNewPrivileges=yes --working-directory="${home}" \
+      --setenv=HOME --setenv=HERMES_HOME --setenv=HERMES_KANBAN_HOME --setenv=HERMES_KANBAN_WORKSPACES_ROOT \
+      --setenv=HERMES_KANBAN_ATTACHMENTS_ROOT --setenv=HERMES_KANBAN_DISPATCH_IN_GATEWAY \
+      --setenv=HERMES_MAX_ITERATIONS --setenv=HERMES_REDACT_SECRETS \
+      --setenv=HERMES_WRITE_SAFE_ROOT \
+      {{ .HermesBin }} kanban dispatch --json --max "${max}" ;;
+  run-stop)
+    case "${1:-}" in
+      snowfarm-run-"${name}"-*.service)
+        # With no container runtime, everything the run started is in this
+        # unit's cgroup, so stopping the unit ends the whole run.
+        exec systemctl --user stop "$1" ;;
+      *) exit 2 ;;
+    esac ;;
+  run-list)
+    exec systemctl --user list-units --plain --no-legend --all "snowfarm-run-${name}-*.service" ;;
+  kanban)
+    case "${1:-}" in create|notify-subscribe|notify-unsubscribe|block|reclaim|diagnostics|list|show|stats) exec {{ .HermesBin }} kanban "$@" ;; *) exit 2 ;; esac ;;
+  *) echo "farm-unitctl: verb ${verb} not allowed" >&2; exit 2 ;;
+esac

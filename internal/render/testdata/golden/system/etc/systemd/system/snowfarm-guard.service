@@ -1,0 +1,27 @@
+[Unit]
+Description=snowfarm supervisor
+After=network-online.target systemd-tmpfiles-setup.service tailscaled.service
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+# sudo needs setuid: a hardening directive that installs a seccomp filter makes
+# the kernel drop the setuid bit, and every guard action goes through sudo.
+Type=notify
+User=snowfarm
+Group=farm-agents
+SupplementaryGroups=systemd-journal
+ExecStart=/usr/local/bin/snowfarm guard --config /etc/snowfarm/farm.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+WatchdogSec=90
+UMask=0027
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=/var/lib/snowfarm /run/snowfarm /srv/snowfarm /var/lib/farm
+
+[Install]
+WantedBy=multi-user.target
