@@ -50,9 +50,12 @@ func teamsOf(r *roster.Roster, a roster.Agent) []roster.Team {
 	return out
 }
 
+// teammateWorkers is the manager's assignable set, which is the enabled
+// workers only: apply provisions no unit for a disabled agent, so a card
+// assigned to one would never run and never report.
 func teammateWorkers(r *roster.Roster, a roster.Agent) []roster.Agent {
 	var out []roster.Agent
-	for _, w := range r.Workers() {
+	for _, w := range r.EnabledWorkers() {
 		if slices.ContainsFunc(w.Teams, func(team string) bool { return slices.Contains(a.Teams, team) }) {
 			out = append(out, w)
 		}

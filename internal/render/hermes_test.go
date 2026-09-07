@@ -178,3 +178,30 @@ func TestSkillsRejectsUnshippedSkill(t *testing.T) {
 		t.Fatal("a skill the supervisor does not ship must not render as an empty file")
 	}
 }
+
+func TestSoulNamesOnlyEnabledWorkers(t *testing.T) {
+	r := loadRoster(t)
+	const off = "argus"
+	r.Agents = slices.Clone(r.Agents)
+	for i := range r.Agents {
+		if r.Agents[i].Name == off {
+			r.Agents[i].Enabled = false
+		}
+	}
+	atlas, ok := r.Agent("atlas")
+	if !ok {
+		t.Fatal("atlas is missing from the fixture")
+	}
+	soul, err := Soul(r, atlas)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(soul), off) {
+		t.Fatalf("the manager SOUL offers %s as an assignee, but apply provisions no unit for a disabled agent", off)
+	}
+	for _, want := range []string{"hestia", "euclid", "hypatia", "daedalus"} {
+		if !strings.Contains(string(soul), want) {
+			t.Fatalf("the manager SOUL dropped the enabled worker %s", want)
+		}
+	}
+}
