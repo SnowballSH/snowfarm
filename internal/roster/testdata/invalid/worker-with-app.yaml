@@ -1,0 +1,165 @@
+farm:
+  home_root: /var/lib/farm
+  kanban_home: /srv/snowfarm/kanban
+  claude_dir: /srv/snowfarm/claude
+  hermes_bin: /usr/local/bin/hermes
+  location: America/New_York
+  uid_base: 6000
+  metrics_addr: 127.0.0.1:9110
+  modelgate: {api: https://llm.snowballsh.com/v1}
+  discord:
+    guild_id: "100000000000000001"
+    operator_user_id: "100000000000000002"
+    supervisor_application_id: "100000000000000003"
+teams:
+  - {name: assistant, label: "TEAM · ASSISTANT"}
+  - {name: snowsys,   label: "TEAM · SNOWSYS"}
+  - {name: research,  label: "TEAM · RESEARCH"}
+  - {name: swe,       label: "TEAM · SOFTWARE ENGINEERING"}
+  - {name: avalanche, label: "TEAM · AVALANCHE"}
+agents:
+  - name: atlas
+    tier: manager
+    teams: [assistant, snowsys, research, swe, avalanche]
+    model: gpt-5.6-sol
+    reasoning: medium
+    discord_application_id: "200000000000000001"
+    toolsets: [kanban, web, file, memory, vision, cronjob, terminal, discord, skills]
+    skills: [farm-claude-code, farm-subscribe]
+    limits: {slice_mib: 2048, cpu_percent: 150}
+    env: [CLAUDE_CODE_OAUTH_TOKEN, DISCORD_BOT_TOKEN, FARM_MODELGATE_KEY, FARM_GITHUB_TEAMS_TOKEN, FARM_SNOWBLOG_ADMIN_TOKEN]
+    allow_private_urls: true
+    max_iterations: 120
+    context_length: 400000
+    enabled: true
+    modelgate_key_minted: "2026-09-10"
+  - name: iris
+    tier: manager
+    teams: [research, swe]
+    model: claude-opus-5
+    reasoning: low
+    discord_application_id: "200000000000000002"
+    toolsets: [kanban, web, file, memory, vision, cronjob, terminal, discord, skills]
+    skills: [farm-claude-code, farm-subscribe]
+    limits: {slice_mib: 2048, cpu_percent: 150}
+    env: [CLAUDE_CODE_OAUTH_TOKEN, DISCORD_BOT_TOKEN, FARM_MODELGATE_KEY, FARM_GITHUB_TEAMS_TOKEN]
+    max_iterations: 120
+    context_length: 200000
+    enabled: true
+    modelgate_key_minted: ""
+  - name: hestia
+    tier: worker
+    discord_application_id: "200000000000000004"
+    teams: [assistant]
+    model: gpt-5.6-luna
+    reasoning: xhigh
+    toolsets: [kanban, terminal, file, web, memory, vision, skills, mcp-google-calendar]
+    skills: [farm-claude-code]
+    # The three tier tools every worker gives up, plus every WRITE tool the
+    # pinned google-calendar-mcp v2.6.3 exposes EXCEPT create-event and
+    # create-events. E4/F3 re-derives the write set from the pin as a
+    # completeness scan and corrects any name drift.
+    disabled_tools: [skill_manage, kanban_create, kanban_link, delete-event, update-event, respond-to-event, manage-accounts]
+    limits: {slice_mib: 2048, run_mib: 1792, cpu_percent: 150}
+    env: [CLAUDE_CODE_OAUTH_TOKEN, FARM_MODELGATE_KEY, FARM_SNOWBLOG_ADMIN_TOKEN, FARM_FILEBROWSER_TOKEN]
+    allow_private_urls: true
+    mcp_servers:
+      - name: google-calendar
+        command: /usr/bin/node
+        args: [/usr/local/lib/google-calendar-mcp/build/index.js]
+        env: {GOOGLE_OAUTH_CREDENTIALS: /var/lib/farm/hestia/google/client.json, GOOGLE_CALENDAR_MCP_TOKEN_PATH: /var/lib/farm/hestia/google/tokens.json}
+        version: "2.6.3"
+        # The tarball sha256 is pinned by the F0 operator ceremony; the
+        # bootstrap fetch check is the integrity gate, this field is provenance.
+        sha256: ""
+    max_iterations: 80
+    context_length: 400000
+    enabled: true
+    modelgate_key_minted: "2026-09-10"
+  - name: argus
+    tier: worker
+    teams: [snowsys]
+    model: gpt-5.6-luna
+    reasoning: xhigh
+    toolsets: [kanban, terminal, file, web, memory, skills, mcp-grafana]
+    skills: [farm-claude-code]
+    disabled_tools: [skill_manage, kanban_create, kanban_link]
+    limits: {slice_mib: 2048, run_mib: 1792, cpu_percent: 150}
+    env: [CLAUDE_CODE_OAUTH_TOKEN, FARM_MODELGATE_KEY, FARM_GRAFANA_READ_TOKEN, FARM_GITHUB_SNOWSYS_TOKEN, FARM_SNOWDEPLOY_TOKEN]
+    allow_private_urls: true
+    mcp_servers:
+      - name: grafana
+        command: /usr/local/bin/mcp-grafana
+        args: [--url, https://grafana.snowballsh.com]
+        env: {GRAFANA_API_KEY_FILE: /var/lib/farm/argus/grafana/token}
+        # Version and checksum are pinned by the F4 operator ceremony.
+        version: ""
+        sha256: ""
+    max_iterations: 80
+    context_length: 400000
+    enabled: true
+    modelgate_key_minted: ""
+  - name: euclid
+    tier: worker
+    teams: [research]
+    model: gpt-5.6-luna
+    reasoning: xhigh
+    toolsets: [kanban, terminal, file, web, memory, skills]
+    skills: [farm-claude-code]
+    disabled_tools: [skill_manage, kanban_create, kanban_link]
+    limits: {slice_mib: 2048, run_mib: 1792, cpu_percent: 150}
+    env: [CLAUDE_CODE_OAUTH_TOKEN, FARM_MODELGATE_KEY, FARM_GITHUB_TEAMS_TOKEN]
+    max_iterations: 80
+    context_length: 400000
+    enabled: true
+    modelgate_key_minted: ""
+  - name: hypatia
+    tier: worker
+    teams: [research]
+    model: gpt-5.6-luna
+    reasoning: xhigh
+    toolsets: [kanban, terminal, file, web, memory, skills]
+    skills: [farm-claude-code]
+    disabled_tools: [skill_manage, kanban_create, kanban_link]
+    limits: {slice_mib: 2048, run_mib: 1792, cpu_percent: 150}
+    env: [CLAUDE_CODE_OAUTH_TOKEN, FARM_MODELGATE_KEY, FARM_GITHUB_TEAMS_TOKEN]
+    max_iterations: 80
+    context_length: 400000
+    enabled: true
+    modelgate_key_minted: ""
+  - name: daedalus
+    tier: worker
+    teams: [swe]
+    model: gpt-5.6-luna
+    reasoning: xhigh
+    toolsets: [kanban, terminal, file, web, memory, skills]
+    skills: [farm-claude-code]
+    disabled_tools: [skill_manage, kanban_create, kanban_link]
+    limits: {slice_mib: 2048, run_mib: 1792, cpu_percent: 150}
+    env: [CLAUDE_CODE_OAUTH_TOKEN, FARM_MODELGATE_KEY, FARM_GITHUB_SWE_TOKEN]
+    max_iterations: 80
+    context_length: 400000
+    enabled: true
+    modelgate_key_minted: ""
+schedules:
+  - name: snowsys-morning
+    cron: "0 8 * * *"
+    location: America/New_York
+    title: "Morning SnowSys check"
+    body: "Read the SnowSys Grafana overview and alerts dashboards over the tailnet with the grafana MCP tools. Report firing alerts, targets down, backup age, disk and memory headroom, and anything anomalous since yesterday. Complete with a short summary; block with needs_input only if you need the operator."
+    assignee: argus
+    notifier: atlas
+    channel: "#snowsys-log"
+    max_runtime: 2h
+    priority: 5
+guard:
+  max_concurrent_runs: 1
+  max_claude_slots: 2
+  manager_turns_per_hour: 30
+  operator_mentions_per_hour: 6
+  burst_per_5m: 20
+  restart_budget_per_6h: 6
+  dispatch_interval: 30s
+  default_max_runtime: 2h
+  hygiene_interval: 5m
+  restart_window: "04:00-05:00"

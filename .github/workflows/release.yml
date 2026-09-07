@@ -1,0 +1,25 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-24.04-arm
+    env:
+      CGO_ENABLED: "0"
+      GOOS: linux
+      GOARCH: arm64
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      - run: |
+          go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o dist/snowfarm ./cmd/snowfarm
+          go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o dist/farm-claude ./cmd/farm-claude
+          sha256sum dist/* > dist/SHA256SUMS
+      - run: gh release create "$GITHUB_REF_NAME" dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
