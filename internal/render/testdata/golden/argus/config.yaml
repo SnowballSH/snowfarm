@@ -1,0 +1,85 @@
+model:
+  provider: custom:modelgate
+  default: gpt-5.6-luna
+  max_tokens: 32768
+  context_length: 400000
+providers:
+  modelgate:
+    api: https://llm.snowballsh.com/v1
+    key_env: FARM_MODELGATE_KEY
+    transport: chat_completions
+agent:
+  reasoning_effort: xhigh
+  disabled_tools:
+    - skill_manage
+    - kanban_create
+    - kanban_link
+auxiliary:
+  approval:
+    provider: modelgate
+    model: gpt-5.6-luna
+    reasoning_effort: low
+  background_review:
+    provider: modelgate
+    model: gpt-5.6-luna
+    reasoning_effort: low
+  compression:
+    provider: modelgate
+    model: gpt-5.6-luna
+    reasoning_effort: low
+  curator:
+    provider: modelgate
+    model: gpt-5.6-luna
+    reasoning_effort: low
+  kanban_decomposer:
+    provider: modelgate
+    model: gpt-5.6-luna
+    reasoning_effort: low
+  title_generation:
+    provider: modelgate
+    model: gpt-5.6-luna
+    reasoning_effort: low
+  triage_specifier:
+    provider: modelgate
+    model: gpt-5.6-luna
+    reasoning_effort: low
+  vision:
+    provider: modelgate
+    model: gpt-5.6-luna
+    reasoning_effort: low
+toolsets:
+  - kanban
+  - terminal
+  - file
+  - web
+  - memory
+  - skills
+  - mcp-grafana
+terminal:
+  backend: local
+  cwd: /var/lib/farm/argus
+display:
+  tool_progress: log
+kanban:
+  dispatch_in_gateway: false
+  review_dispatch: false
+  auto_decompose: false
+  max_in_progress_per_profile: 1
+  failure_limit: 2
+security:
+  allow_lazy_installs: false
+  allow_private_urls: true
+secrets:
+  command:
+    enabled: true
+    command: /usr/local/bin/snowfarm secret-env
+approvals:
+  mode: smart
+mcp_servers:
+  grafana:
+    command: /usr/local/bin/mcp-grafana
+    args:
+      - --url
+      - https://grafana.snowballsh.com
+    env:
+      GRAFANA_API_KEY_FILE: /var/lib/farm/argus/grafana/token

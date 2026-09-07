@@ -1,0 +1,87 @@
+model:
+  provider: custom:modelgate
+  default: gpt-5.6-sol
+  max_tokens: 16384
+  context_length: 400000
+providers:
+  modelgate:
+    api: https://llm.snowballsh.com/v1
+    key_env: FARM_MODELGATE_KEY
+    transport: chat_completions
+agent:
+  reasoning_effort: medium
+  disabled_tools:
+    - skill_manage
+auxiliary:
+  approval:
+    provider: modelgate
+    model: gpt-5.6-luna
+    reasoning_effort: low
+  background_review:
+    provider: modelgate
+    model: gpt-5.6-luna
+    reasoning_effort: low
+  compression:
+    provider: modelgate
+    model: gpt-5.6-luna
+    reasoning_effort: low
+  curator:
+    provider: modelgate
+    model: gpt-5.6-luna
+    reasoning_effort: low
+  kanban_decomposer:
+    provider: modelgate
+    model: gpt-5.6-luna
+    reasoning_effort: low
+  title_generation:
+    provider: modelgate
+    model: gpt-5.6-luna
+    reasoning_effort: low
+  triage_specifier:
+    provider: modelgate
+    model: gpt-5.6-luna
+    reasoning_effort: low
+  vision:
+    provider: modelgate
+    model: gpt-5.6-luna
+    reasoning_effort: low
+toolsets:
+  - kanban
+  - web
+  - file
+  - memory
+  - vision
+  - cronjob
+  - terminal
+  - discord
+  - skills
+terminal:
+  backend: local
+  cwd: /var/lib/farm/atlas
+discord:
+  server_actions:
+    - fetch_messages
+display:
+  tool_progress: log
+  platforms:
+    discord:
+      interim_assistant_messages: false
+      cleanup_progress: true
+kanban:
+  dispatch_in_gateway: false
+  review_dispatch: false
+  auto_decompose: false
+  max_in_progress_per_profile: 1
+  failure_limit: 2
+security:
+  allow_lazy_installs: false
+  allow_private_urls: true
+secrets:
+  command:
+    enabled: true
+    command: /usr/local/bin/snowfarm secret-env
+session_reset:
+  mode: daily
+  at_hour: 3
+approvals:
+  mode: smart
