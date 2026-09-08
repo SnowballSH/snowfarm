@@ -70,6 +70,12 @@ func TestParseStreamLimits(t *testing.T) {
 			text:   "The earlier run stopped on this:\n\nYou've hit your weekly limit · resets Mon 12:00am\n\nI waited and finished the report.",
 		},
 		{
+			name: "an allowed rate limit event does not corroborate a quoted message",
+			stream: `{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":` + itoa(resetsAt.Unix()) + `}}
+{"type":"result","subtype":"success","is_error":false,"num_turns":3,"result":"I read the log:\nYou've hit your weekly limit · resets Mon 12:00am"}`,
+			text: "I read the log:\nYou've hit your weekly limit · resets Mon 12:00am",
+		},
+		{
 			name:   "a limit message closing a successful answer is not a limit",
 			stream: `{"type":"result","subtype":"success","is_error":false,"num_turns":4,"result":"The wrapper answered:\nYou've hit your weekly limit · resets Mon 12:00am"}`,
 			text:   "The wrapper answered:\nYou've hit your weekly limit · resets Mon 12:00am",

@@ -109,8 +109,13 @@ func (s Stream) Limit(now time.Time) (Limit, bool) {
 	return Limit{Kind: kind, ResetAt: s.resetAt(resetText, now)}, true
 }
 
+// failed reports the signals that corroborate a quoted limit message. An
+// "allowed" rate_limit_event is the ordinary shape of a healthy run, so only a
+// rejected one counts: without that clause a successful answer quoting a limit
+// line halts the whole farm for the week the line names.
 func (s Stream) failed(result ResultLine) bool {
-	return result.IsError || result.APIErrorStatus == 429 || s.rateLimit != nil
+	return result.IsError || result.APIErrorStatus == 429 ||
+		(s.rateLimit != nil && s.rateLimit.Status == statusRejected)
 }
 
 // limitKind reads the kind out of the result object. The result text is
