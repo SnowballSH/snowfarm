@@ -1064,6 +1064,42 @@ func TestBackstopStopsEachRunOnce(t *testing.T) {
 	}
 }
 
+// A reclaim that landed has taken the card out of the board's running set,
+// and the backstop revisits nothing else, so an advisory promising a retry
+// after a failed block would have the operator wait for a tick that never
+// comes back to this card.
+func TestStopAdvisoryPromisesNoRetryOnceTheCardIsReclaimed(t *testing.T) {
+	r := testRoster(2, "argus")
+	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
+	started := now.Add(-(time.Hour + testGrace + time.Minute))
+	h := newHarness(t, r, card{id: "t_over", assignee: "argus", startedAt: started, maxRuntime: time.Hour})
+	h.journal.fallback = payload(t, "dispatch-idle.json")
+	unit := "snowfarm-run-argus-9.service"
+	h.units.setLive("argus", unit)
+	if err := h.ledger.RecordSpawn("argus", unit, "t_over", h.clock()); err != nil {
+		t.Fatal(err)
+	}
+	h.units.failKanban("block", 1)
+
+	if err := h.loop.Tick(context.Background()); err == nil {
+		t.Fatal("a tick whose block failed reported no error")
+	}
+
+	posts := h.allPosts()
+	if len(posts) != 1 {
+		t.Fatalf("posts %+v, want the one failed-stop advisory", posts)
+	}
+	if !strings.Contains(posts[0].text, "could not block the card") {
+		t.Fatalf("advisory %q, does not name the step that failed", posts[0].text)
+	}
+	if strings.Contains(posts[0].text, "retries") {
+		t.Fatalf("advisory %q promises a retry for a card that left the running set", posts[0].text)
+	}
+	if !strings.Contains(posts[0].text, "block it by hand") {
+		t.Fatalf("advisory %q does not say what the operator must do", posts[0].text)
+	}
+}
+
 func TestBackstopRetriesAStopThatDidNotLand(t *testing.T) {
 	r := testRoster(2, "argus")
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
@@ -1107,8 +1143,9 @@ func TestBackstopRetriesAStopThatDidNotLand(t *testing.T) {
 	if len(posts) != 2 {
 		t.Fatalf("posts %+v, want one retry advisory and one stop notice", posts)
 	}
-	if !strings.Contains(posts[0].text, "could not reclaim and block it") {
-		t.Fatalf("first post %q, want the failed-stop advisory", posts[0].text)
+	if !strings.Contains(posts[0].text, "could not reclaim the card") ||
+		!strings.Contains(posts[0].text, "retries the whole stop on every tick") {
+		t.Fatalf("first post %q, want the failed-stop advisory naming the retry", posts[0].text)
 	}
 	if !strings.Contains(posts[1].text, "reclaimed and blocked (transient)") {
 		t.Fatalf("second post %q, want the stop notice", posts[1].text)

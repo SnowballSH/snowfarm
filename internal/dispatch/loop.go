@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -411,20 +412,26 @@ func (l *Loop) stopRun(ctx context.Context, card board.RunningCard, reason strin
 	}
 	detail := stopDetail(reason, budget)
 	var errs []error
+	var failed []string
 	if unit != "" && l.unitLives(ctx, card.Assignee, unit) {
 		if err := l.Units.RunStop(ctx, card.Assignee, unit); err != nil {
 			errs = append(errs, err)
+			failed = append(failed, "stop the run unit")
 		}
 	}
 	blocked := "the farm guard stopped this run: " + detail
+	reclaimed := true
 	if _, err := l.Units.Kanban(ctx, card.Assignee, "reclaim", card.ID); err != nil {
 		errs = append(errs, err)
+		failed = append(failed, "reclaim the card")
+		reclaimed = false
 	}
 	if _, err := l.Units.Kanban(ctx, card.Assignee, "block", card.ID, blocked, "--kind", "transient"); err != nil {
 		errs = append(errs, err)
+		failed = append(failed, "block the card")
 	}
 	if len(errs) > 0 {
-		errs = append(errs, l.adviseStopFailed(ctx, card, unit, detail, now))
+		errs = append(errs, l.adviseStopFailed(ctx, card, unit, detail, failed, reclaimed, now))
 		return errors.Join(errs...)
 	}
 	if err := l.Ledger.RecordStop(card.ID, unit, reason, now); err != nil {
@@ -437,17 +444,24 @@ func (l *Loop) stopRun(ctx context.Context, card board.RunningCard, reason strin
 	return nil
 }
 
-// adviseStopFailed tells the card's thread once — not once per tick — that the
-// guard is retrying a stop it could not land.
-func (l *Loop) adviseStopFailed(ctx context.Context, card board.RunningCard, unit, detail string, now time.Time) error {
+// adviseStopFailed tells the card's thread once — not once per tick — which
+// steps of the stop did not land, and whether a later tick will try again. A
+// reclaim that succeeded has taken the card out of the board's running set,
+// which is the only set the guard revisits, so promising a retry there would
+// leave the operator waiting for one that never comes.
+func (l *Loop) adviseStopFailed(ctx context.Context, card board.RunningCard, unit, detail string, failed []string, reclaimed bool, now time.Time) error {
 	first, err := l.Ledger.NoticeOnce(noticeStopFailed, card.ID+"@"+unit, now)
 	if err != nil || !first {
 		return err
 	}
+	next := "it is still running, so the guard retries the whole stop on every tick"
+	if reclaimed {
+		next = "the card was reclaimed and has left the running set, so no tick revisits it: " +
+			"block it by hand or it will be claimed again"
+	}
 	l.postToCard(ctx, card.ID, fmt.Sprintf(
-		"card %s (%s): %s, but the guard could not reclaim and block it; "+
-			"it is still running and the guard will retry on every tick",
-		card.ID, card.Assignee, detail))
+		"card %s (%s): %s, but the guard could not %s; %s",
+		card.ID, card.Assignee, detail, strings.Join(failed, " or "), next))
 	return nil
 }
 
