@@ -8,7 +8,37 @@ case "${SNOWFARM_FAKEBIN_MODE:-ok}" in
   empty) exit 0 ;;
 esac
 
-cat <<'JSON'
-{"__CURSOR":"s=1;i=1","__REALTIME_TIMESTAMP":"1757000000123456","_UID":"6003","PRIORITY":"6","MESSAGE":"{\"spawned\": [{\"task_id\": \"t_1\"}], \"promoted\": []}"}
-{"__CURSOR":"s=1;i=2","__REALTIME_TIMESTAMP":"1757000001654321","_UID":"6003","PRIORITY":"3","MESSAGE":"Main process exited, code=exited, status=75/n/a"}
-JSON
+# Answers the selection the way journalctl does: terms are ANDed within a
+# group, "+" opens a new group, and groups are ORed. The agent's own line is
+# tagged _SYSTEMD_USER_UNIT=, the user manager's exit line USER_UNIT=.
+unit='snowfarm-run-hestia-1757000000123456789.service'
+own=no
+manager=no
+group_uid=no
+group_own=no
+group_manager=no
+
+close_group() {
+  if [ "${group_uid}" = yes ] && [ "${group_own}" = yes ]; then own=yes; fi
+  if [ "${group_uid}" = yes ] && [ "${group_manager}" = yes ]; then manager=yes; fi
+  group_uid=no
+  group_own=no
+  group_manager=no
+}
+
+for arg in "$@"; do
+  case "${arg}" in
+    +) close_group ;;
+    _UID=*) group_uid=yes ;;
+    _SYSTEMD_USER_UNIT="${unit}") group_own=yes ;;
+    USER_UNIT="${unit}") group_manager=yes ;;
+  esac
+done
+close_group
+
+if [ "${own}" = yes ]; then
+  printf '%s\n' '{"__CURSOR":"s=1;i=1","__REALTIME_TIMESTAMP":"1757000000123456","_UID":"6003","_SYSTEMD_USER_UNIT":"'"${unit}"'","PRIORITY":"6","MESSAGE":"{\"spawned\": [{\"task_id\": \"t_1\"}], \"promoted\": []}"}'
+fi
+if [ "${manager}" = yes ]; then
+  printf '%s\n' '{"__CURSOR":"s=1;i=2","__REALTIME_TIMESTAMP":"1757000001654321","_UID":"6003","USER_UNIT":"'"${unit}"'","PRIORITY":"3","MESSAGE":"Main process exited, code=exited, status=75/n/a"}'
+fi

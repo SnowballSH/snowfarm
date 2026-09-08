@@ -68,9 +68,34 @@ func TestJournalParsesJSON(t *testing.T) {
 		"--no-pager", "-o", "json", "--output-fields=MESSAGE,PRIORITY",
 		"--since", "@1757000000",
 		"_UID=6003", "_SYSTEMD_USER_UNIT=" + unit,
+		"+",
+		"_UID=6003", "USER_UNIT=" + unit,
 	}
 	if !slices.Equal(argv, wantArgv) {
 		t.Errorf("journalctl argv %v, want %v", argv, wantArgv)
+	}
+}
+
+func TestUserUnitSeesTheManagersExitLine(t *testing.T) {
+	state := fakeJournalctl(t)
+
+	entries, err := NewExec("journalctl").UserUnit(context.Background(), 6003, unit, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const exited = "Main process exited, code=exited, status=75/n/a"
+	if !slices.ContainsFunc(entries, func(e Entry) bool { return e.Message == exited }) {
+		t.Errorf("UserUnit returned %+v, none of it the run's exit status", entries)
+	}
+
+	argv := recordedArgv(t, state)
+	group := slices.Index(argv, "+")
+	if group < 0 {
+		t.Fatalf("journalctl argv %v selects one group, so the manager's messages about the unit are out of reach", argv)
+	}
+	if manager := argv[group+1:]; !slices.Equal(manager, []string{"_UID=6003", "USER_UNIT=" + unit}) {
+		t.Errorf("the second match group is %v, want the user manager's own tagging of the unit", manager)
 	}
 }
 

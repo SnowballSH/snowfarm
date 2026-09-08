@@ -1,6 +1,8 @@
-// Package journal reads what a farm agent's processes wrote: the structured
-// journal of one transient run unit, and the gateway's own log file, which is
-// a plain file the guard tails by offset rather than a journal stream.
+// Package journal reads what one transient run unit produced -- both the
+// entries the agent's own processes wrote and the user manager's messages
+// about the unit, which carry its exit status -- and the gateway's own log
+// file, which is a plain file the guard tails by offset rather than a journal
+// stream.
 package journal
 
 import (
@@ -61,7 +63,7 @@ func (r *execReader) UserUnit(ctx context.Context, uid int, unit string, since t
 	if !since.IsZero() {
 		args = append(args, "--since", "@"+strconv.FormatInt(since.Unix(), 10))
 	}
-	args = append(args, "_UID="+strconv.Itoa(uid), "_SYSTEMD_USER_UNIT="+unit)
+	args = append(args, unitMatches(uid, unit)...)
 
 	cmd := exec.CommandContext(ctx, r.journalctl, args...) // #nosec G204 -- the arguments are a fixed flag set plus a checked uid and unit name
 	var stdout, stderr bytes.Buffer
@@ -70,6 +72,24 @@ func (r *execReader) UserUnit(ctx context.Context, uid int, unit string, since t
 		return nil, fmt.Errorf("%s %s: %w: %s", r.journalctl, strings.Join(args, " "), err, bytes.TrimSpace(stderr.Bytes()))
 	}
 	return parseEntries(stdout.Bytes())
+}
+
+// unitMatches is the selection systemd's own add_matches_for_user_unit builds,
+// reduced to the two clauses this reader needs and spelled for journalctl,
+// whose "+" argument separates disjunctive groups while terms within a group
+// are ANDed. The agent's processes log with _SYSTEMD_USER_UNIT=, but the user
+// manager logs its messages about the unit -- "Main process exited,
+// code=exited, status=N", "Failed with result 'exit-code'" -- with USER_UNIT=,
+// so a selection carrying only the first clause can never see a run's exit
+// status. journalctl's own --user-unit flag is not a substitute: it binds the
+// uid to the caller's, and the guard reads as snowfarm, not as the agent.
+func unitMatches(uid int, unit string) []string {
+	owner := "_UID=" + strconv.Itoa(uid)
+	return []string{
+		owner, "_SYSTEMD_USER_UNIT=" + unit,
+		"+",
+		owner, "USER_UNIT=" + unit,
+	}
 }
 
 func parseEntries(out []byte) ([]Entry, error) {
