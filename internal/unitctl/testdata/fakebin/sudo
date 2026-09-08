@@ -1,0 +1,39 @@
+#!/bin/sh
+set -eu
+state="${SNOWFARM_FAKEBIN_STATE:?SNOWFARM_FAKEBIN_STATE is unset}"
+calls=$(( $(cat "${state}/calls" 2>/dev/null || echo 0) + 1 ))
+printf '%s' "${calls}" > "${state}/calls"
+{ printf '%s\n' "$0"; for arg in "$@"; do printf '%s\n' "${arg}"; done; } > "${state}/argv.${calls}"
+
+user=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -u) user="${2:-}"; shift 2 ;;
+    --) shift; break ;;
+    *) shift ;;
+  esac
+done
+[ $# -gt 1 ] || exit 2
+shift
+name="${user#farm-}"
+verb="$1"; shift
+
+case "${name}" in
+  ghost) printf 'inactive\n'; printf 'sudo: a password is required\n' >&2; exit 3 ;;
+esac
+
+case "${verb}" in
+  gateway) printf 'active\n' ;;
+  run-dispatch|run-maintenance)
+    case "${name}" in
+      impostor) printf 'snowfarm-run-atlas-1.service\n' ;;
+      mute) : ;;
+      *) printf 'snowfarm-run-%s-1757000000123456789.service\n' "${name}" ;;
+    esac ;;
+  run-stop) : ;;
+  run-list)
+    printf '%s\n' "snowfarm-run-${name}-1.service loaded active running Hermes dispatch pass" \
+      "snowfarm-run-${name}-2.service loaded failed failed Hermes dispatch pass" ;;
+  kanban) printf 'kanban %s\n' "$*" ;;
+  *) exit 2 ;;
+esac
