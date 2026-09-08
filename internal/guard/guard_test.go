@@ -2,13 +2,16 @@ package guard
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -246,6 +249,89 @@ func writeAgeFiles(t *testing.T, dir string) string {
 	identityPath := filepath.Join(dir, "age.key")
 	write(t, identityPath, identity.String()+"\n")
 	return identityPath
+}
+
+// bindGuard is a guard built for its listener alone: a fake bind, a counted
+// sleep, and a clock the sleep moves.
+func bindGuard(t *testing.T, listen func(network, address string) (net.Listener, error)) (*Guard, *int) {
+	t.Helper()
+	now := time.Date(2026, 9, 7, 3, 0, 0, 0, time.UTC)
+	slept := 0
+	cfg := Config{
+		Listen: listen,
+		Sleep:  func(d time.Duration) { slept++; now = now.Add(d) },
+		Now:    func() time.Time { return now },
+		Log:    slog.New(slog.NewTextHandler(testWriter{t}, nil)),
+	}
+	cfg.withDefaults()
+	return &Guard{cfg: cfg, log: cfg.Log}, &slept
+}
+
+func bindRefused(err error) func(network, address string) (net.Listener, error) {
+	return func(network, address string) (net.Listener, error) {
+		return nil, &net.OpError{Op: "listen", Net: network, Err: os.NewSyscallError("bind", err)}
+	}
+}
+
+// A cold boot starts the guard as soon as tailscaled reports started, which
+// is before the interface carries the farm's tailnet address. Exiting on that
+// first bind would spend the unit's five starts in twenty-five seconds and
+// leave the host with a stopped guard nobody asked for, so the guard waits —
+// bounded, and before it costs any Discord session.
+func TestMetricsBindWaitsForTheTailnetAddress(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			t.Errorf("close listener: %v", err)
+		}
+	})
+	refused := bindRefused(syscall.EADDRNOTAVAIL)
+	attempts := 0
+	g, slept := bindGuard(t, func(network, address string) (net.Listener, error) {
+		attempts++
+		if attempts <= 3 {
+			return refused(network, address)
+		}
+		return listener, nil
+	})
+
+	got, err := g.listenMetrics("100.64.0.7:9110")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	if got != listener {
+		t.Fatal("the wait returned a listener the bind did not")
+	}
+	if *slept != 3 {
+		t.Fatalf("waited %d times for an address that appeared on the fourth bind, want 3", *slept)
+	}
+}
+
+func TestMetricsBindGivesUpAndFailsOnEveryOtherError(t *testing.T) {
+	t.Run("an address that never appears", func(t *testing.T) {
+		g, slept := bindGuard(t, bindRefused(syscall.EADDRNOTAVAIL))
+		if _, err := g.listenMetrics("100.64.0.7:9110"); err == nil {
+			t.Fatal("the wait never ended")
+		} else if !strings.Contains(err.Error(), "100.64.0.7:9110") {
+			t.Fatalf("error %v does not name the address", err)
+		}
+		if want := int(metricsBindWait / metricsBindPoll); *slept != want {
+			t.Fatalf("waited %d times, want the bound of %d", *slept, want)
+		}
+	})
+
+	t.Run("a port already in use", func(t *testing.T) {
+		g, slept := bindGuard(t, bindRefused(syscall.EADDRINUSE))
+		if _, err := g.listenMetrics("100.64.0.7:9110"); err == nil {
+			t.Fatal("a bind refused for a reason waiting cannot fix reported success")
+		}
+		if *slept != 0 {
+			t.Fatalf("waited %d times on an address already in use, want 0", *slept)
+		}
+	})
 }
 
 // Without a served /metrics every snowfarm_* family is registered and never

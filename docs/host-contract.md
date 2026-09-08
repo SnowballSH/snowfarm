@@ -250,7 +250,7 @@ write runs nothing reads.
 
 | Unit | Scope | Notes |
 |---|---|---|
-| `snowfarm-guard.service` | system | `Type=notify`, `User=snowfarm Group=farm-agents`, `SupplementaryGroups=systemd-journal`, `WatchdogSec=90`, `ProtectSystem=strict` with `ReadWritePaths=` covering `/var/lib/snowfarm /run/snowfarm /srv/snowfarm /var/lib/farm` and any roster path outside them. It carries no seccomp or namespace directive: `sudo` needs setuid, and such a directive makes the kernel drop the setuid bit |
+| `snowfarm-guard.service` | system | `Type=notify`, `User=snowfarm Group=farm-agents`, `SupplementaryGroups=systemd-journal`, `WatchdogSec=90`, `ProtectSystem=strict` with `ReadWritePaths=` covering `/var/lib/snowfarm /run/snowfarm /srv/snowfarm /var/lib/farm` and any roster path outside them. It carries no seccomp or namespace directive: `sudo` needs setuid, and such a directive makes the kernel drop the setuid bit. On a cold boot it waits up to **two minutes**, retrying every two seconds, for `farm.metrics_addr` to be assigned to an interface — `tailscaled` reports started before the tailnet address is up, and the unit's `StartLimitBurst=5` in `StartLimitIntervalSec=300` would otherwise stop the guard for good. Every other bind error still fails at once |
 | `hermes-gateway.service` | user, per manager | `Type=simple`, `NoNewPrivileges=true`, `UMask=0007`, `Restart=on-failure`, and the `DISCORD_*` allow-list the roster fixes |
 | `user-<uid>.slice` drop-in | system | the ceiling on everything the agent runs |
 | `snowfarm-run-<agent>-<ns>.service` | user, transient | one dispatch or maintenance pass, started by `systemd-run --collect` with `ExitType=cgroup` and the agent's run limits |

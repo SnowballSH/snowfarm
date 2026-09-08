@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"filippo.io/age"
@@ -61,6 +62,16 @@ const (
 
 	watchdogPeriod = 30 * time.Second
 
+	// metricsBindPoll and metricsBindWait bound the wait for the tailnet
+	// address. tailscaled reports its unit started before the interface
+	// carries the farm's 100.64.x.y, and the guard unit's start limit is
+	// five failures in five minutes, so exiting on the first
+	// EADDRNOTAVAIL would leave a cold-booted host with a stopped guard
+	// until someone reset it by hand. The bind precedes the Discord
+	// connection, so the wait costs no IDENTIFY.
+	metricsBindPoll = 2 * time.Second
+	metricsBindWait = 2 * time.Minute
+
 	eventBuffer = 256
 )
 
@@ -84,6 +95,11 @@ type Config struct {
 	Journal   journal.Reader
 	NewClient func(token, guildID string) (discord.Client, error)
 	HTTP      *http.Client
+
+	// Listen binds the metrics address and Sleep waits between attempts,
+	// which is the seam the cold-boot wait is tested through.
+	Listen func(network, address string) (net.Listener, error)
+	Sleep  func(d time.Duration)
 
 	// Notify delivers a state line to systemd. A guard started outside
 	// systemd has no socket and the default is a no-op.
@@ -165,9 +181,9 @@ func New(cfg Config) (*Guard, error) {
 	if addr == "" {
 		return nil, errors.New("guard: farm.metrics_addr is empty, so nothing would scrape the farm")
 	}
-	listener, err := net.Listen("tcp", addr)
+	listener, err := g.listenMetrics(addr)
 	if err != nil {
-		return nil, fmt.Errorf("guard: listen on %s: %w", addr, err)
+		return nil, err
 	}
 	g.listener = listener
 	g.metrics = metrics.New()
@@ -202,6 +218,12 @@ func (c *Config) withDefaults() {
 	if c.HTTP == nil {
 		c.HTTP = &http.Client{Timeout: probeTimeout}
 	}
+	if c.Listen == nil {
+		c.Listen = net.Listen
+	}
+	if c.Sleep == nil {
+		c.Sleep = time.Sleep
+	}
 	if c.Notify == nil {
 		c.Notify = sdNotify
 	}
@@ -210,6 +232,29 @@ func (c *Config) withDefaults() {
 	}
 	if c.Log == nil {
 		c.Log = slog.Default()
+	}
+}
+
+// listenMetrics binds the address, waiting while the host says it is not
+// assigned to any interface. Every other bind failure — a port already in
+// use, a malformed address — is a fault the guard exits on at once.
+func (g *Guard) listenMetrics(addr string) (net.Listener, error) {
+	deadline := g.cfg.Now().Add(metricsBindWait)
+	waiting := false
+	for {
+		listener, err := g.cfg.Listen("tcp", addr)
+		switch {
+		case err == nil:
+			return listener, nil
+		case !errors.Is(err, syscall.EADDRNOTAVAIL) || !g.cfg.Now().Before(deadline):
+			return nil, fmt.Errorf("guard: listen on %s: %w", addr, err)
+		}
+		if !waiting {
+			waiting = true
+			g.log.Warn("the metrics address is not assigned to any interface yet, waiting for it",
+				"addr", addr, "within", metricsBindWait)
+		}
+		g.cfg.Sleep(metricsBindPoll)
 	}
 }
 

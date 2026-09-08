@@ -165,7 +165,10 @@ outline:
 `snowfarm guard` is the long-running half. It loads the roster, decrypts the
 age files and binds the metrics address **before** it opens a Discord
 connection, so a guard that cannot start costs no session from a bot's daily
-budget. It then reconciles the guild, records the channel ids in
+budget. That bind waits, for up to two minutes, while the host says the
+address is not assigned to any interface: on a cold boot the tailnet address
+appears after `tailscaled` reports started, and the wait is what keeps the
+unit's start limit from stopping the guard until an operator resets it. It then reconciles the guild, records the channel ids in
 `<state>/channels.json` for `snowfarm apply` to read, and runs the dispatch
 tick, the schedules, the hygiene sweep, the manager breaker, the nightly
 drained restarts, the model-gateway, Google-token and Hermes-pin probes, the
