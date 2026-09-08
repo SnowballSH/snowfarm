@@ -50,6 +50,7 @@ const (
 	outcomeRateLimited = "rate_limited"
 
 	noticeNoMaxRuntime = "no_max_runtime"
+	noticeStopFailed   = "stop_failed"
 )
 
 // Loop is one dispatch tick. The guard runs it serially — tick, sleep,
@@ -377,6 +378,11 @@ func (l *Loop) backstop(ctx context.Context, r *roster.Roster, running []board.R
 // again: reclaim alone returns it to ready with a cleared failure counter, so
 // the next spawn pass would re-claim it within one tick and the stop would
 // undo itself.
+//
+// The stop is recorded only once the board has actually moved. A card the
+// guard failed to reclaim stays running, holding its worker and a farm slot,
+// so recording that failure as a stop would retire the only path that frees
+// them; leaving the ledger untouched has the next tick try again.
 func (l *Loop) stopRun(ctx context.Context, card board.RunningCard, reason string, budget time.Duration, now time.Time) error {
 	unit := l.unitFor(card)
 	stopped, err := l.Ledger.Stopped(card.ID, unit)
@@ -397,12 +403,32 @@ func (l *Loop) stopRun(ctx context.Context, card board.RunningCard, reason strin
 	if _, err := l.Units.Kanban(ctx, card.Assignee, "block", card.ID, blocked, "--kind", "transient"); err != nil {
 		errs = append(errs, err)
 	}
-	errs = append(errs, l.Ledger.RecordStop(card.ID, unit, reason, now))
+	if len(errs) > 0 {
+		errs = append(errs, l.adviseStopFailed(ctx, card, unit, detail, now))
+		return errors.Join(errs...)
+	}
+	if err := l.Ledger.RecordStop(card.ID, unit, reason, now); err != nil {
+		return err
+	}
 	l.Metrics.RunStopsTotal.WithLabelValues(card.Assignee, reason).Inc()
 	l.postToCard(ctx, card.ID, fmt.Sprintf(
 		"card %s (%s): %s; the run was stopped, the card reclaimed and blocked (transient)",
 		card.ID, card.Assignee, detail))
-	return errors.Join(errs...)
+	return nil
+}
+
+// adviseStopFailed tells the card's thread once — not once per tick — that the
+// guard is retrying a stop it could not land.
+func (l *Loop) adviseStopFailed(ctx context.Context, card board.RunningCard, unit, detail string, now time.Time) error {
+	first, err := l.Ledger.NoticeOnce(noticeStopFailed, card.ID+"@"+unit, now)
+	if err != nil || !first {
+		return err
+	}
+	l.postToCard(ctx, card.ID, fmt.Sprintf(
+		"card %s (%s): %s, but the guard could not reclaim and block it; "+
+			"it is still running and the guard will retry on every tick",
+		card.ID, card.Assignee, detail))
+	return nil
 }
 
 func stopDetail(reason string, budget time.Duration) string {

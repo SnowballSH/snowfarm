@@ -44,15 +44,16 @@ type unitCall struct {
 }
 
 type fakeUnits struct {
-	mu    sync.Mutex
-	calls []unitCall
-	live  map[string][]string
-	delay time.Duration
-	seq   int
+	mu         sync.Mutex
+	calls      []unitCall
+	live       map[string][]string
+	kanbanFail map[string]int
+	delay      time.Duration
+	seq        int
 }
 
 func newFakeUnits() *fakeUnits {
-	return &fakeUnits{live: map[string][]string{}}
+	return &fakeUnits{live: map[string][]string{}, kanbanFail: map[string]int{}}
 }
 
 func (f *fakeUnits) Gateway(_ context.Context, agent, verb string) ([]byte, error) {
@@ -90,7 +91,19 @@ func (f *fakeUnits) RunList(_ context.Context, agent string) ([]string, error) {
 
 func (f *fakeUnits) Kanban(_ context.Context, agent string, args ...string) ([]byte, error) {
 	f.record(unitCall{verb: verbKanban, agent: agent, args: args})
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(args) > 0 && f.kanbanFail[args[0]] > 0 {
+		f.kanbanFail[args[0]]--
+		return nil, fmt.Errorf("kanban %s: exit status 1", args[0])
+	}
 	return nil, nil
+}
+
+func (f *fakeUnits) failKanban(sub string, times int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.kanbanFail[sub] = times
 }
 
 func (f *fakeUnits) record(call unitCall) {
@@ -1048,5 +1061,56 @@ func TestBackstopStopsEachRunOnce(t *testing.T) {
 	}
 	if got := len(h.allPosts()); got != 1 {
 		t.Fatalf("%d posts for one stopped run, want 1", got)
+	}
+}
+
+func TestBackstopRetriesAStopThatDidNotLand(t *testing.T) {
+	r := testRoster(2, "argus")
+	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
+	started := now.Add(-(time.Hour + testGrace + time.Minute))
+	h := newHarness(t, r, card{id: "t_over", assignee: "argus", startedAt: started, maxRuntime: time.Hour})
+	h.journal.fallback = payload(t, "dispatch-idle.json")
+	unit := "snowfarm-run-argus-9.service"
+	h.units.setLive("argus", unit)
+	if err := h.ledger.RecordSpawn("argus", unit, "t_over", h.clock()); err != nil {
+		t.Fatal(err)
+	}
+	h.units.failKanban("reclaim", 1)
+
+	if err := h.loop.Tick(context.Background()); err == nil {
+		t.Fatal("a tick whose reclaim failed reported no error")
+	}
+	if stopped, err := h.ledger.Stopped("t_over", unit); err != nil || stopped {
+		t.Fatalf("Stopped after a failed reclaim = %v, %v; want false, nil", stopped, err)
+	}
+	if got := counterValue(t, h.reg.RunStopsTotal, "argus", reasonMaxRuntime); got != 0 {
+		t.Fatalf("run_stops_total{argus,max_runtime} = %v after a failed reclaim, want 0", got)
+	}
+
+	h.advance(testInterval)
+	h.tick()
+
+	if got := len(h.units.kanban("reclaim")); got != 2 {
+		t.Fatalf("%d reclaims, want the failed one retried exactly once", got)
+	}
+	if got := counterValue(t, h.reg.RunStopsTotal, "argus", reasonMaxRuntime); got != 1 {
+		t.Fatalf("run_stops_total{argus,max_runtime} = %v after the retry landed, want 1", got)
+	}
+
+	h.advance(testInterval)
+	h.tick()
+
+	if got := len(h.units.kanban("reclaim")); got != 2 {
+		t.Fatalf("%d reclaims, want no further retry once the stop landed", got)
+	}
+	posts := h.allPosts()
+	if len(posts) != 2 {
+		t.Fatalf("posts %+v, want one retry advisory and one stop notice", posts)
+	}
+	if !strings.Contains(posts[0].text, "could not reclaim and block it") {
+		t.Fatalf("first post %q, want the failed-stop advisory", posts[0].text)
+	}
+	if !strings.Contains(posts[1].text, "reclaimed and blocked (transient)") {
+		t.Fatalf("second post %q, want the stop notice", posts[1].text)
 	}
 }
