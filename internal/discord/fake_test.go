@@ -31,6 +31,15 @@ type fakeClient struct {
 
 	next   int
 	writes []string
+	sends  []sentMessage
+}
+
+// sentMessage is one Send as the poster made it, so a test can assert the
+// channel it reached and whether its notification was suppressed.
+type sentMessage struct {
+	channelID  string
+	content    string
+	suppressed bool
 }
 
 func newFake() *fakeClient {
@@ -147,8 +156,9 @@ func (f *fakeClient) EditChannel(_ context.Context, id string, c ChannelSpec, _ 
 	return fmt.Errorf("no channel %s", id)
 }
 
-func (f *fakeClient) Send(_ context.Context, channelID, content string, _ bool) (string, error) {
+func (f *fakeClient) Send(_ context.Context, channelID, content string, suppressNotifications bool) (string, error) {
 	f.record("Send %s", channelID)
+	f.sends = append(f.sends, sentMessage{channelID: channelID, content: content, suppressed: suppressNotifications})
 	m := Message{ID: f.id(), ChannelID: channelID, Content: content, CreatedAt: time.Unix(0, 0).UTC()}
 	f.messages[channelID] = append(f.messages[channelID], m)
 	return m.ID, nil
