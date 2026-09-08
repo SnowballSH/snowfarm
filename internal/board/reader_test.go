@@ -26,7 +26,8 @@ type taskRow struct {
 	startedAt    time.Time
 	workerPID    int
 	maxRuntime   time.Duration
-	runID        string
+	runID        int
+	runStartedAt time.Time
 }
 
 type eventRow struct {
@@ -75,7 +76,7 @@ func baseTasks() []taskRow {
 			startedAt:    now.Add(-5 * time.Minute),
 			workerPID:    4242,
 			maxRuntime:   2 * time.Hour,
-			runID:        "run-1",
+			runID:        1,
 		},
 	}
 }
@@ -91,7 +92,14 @@ func nullStamp(t time.Time) any {
 	if t.IsZero() {
 		return nil
 	}
-	return t.UTC().Format(time.RFC3339)
+	return t.UTC().Unix()
+}
+
+func runStart(task taskRow) time.Time {
+	if !task.runStartedAt.IsZero() {
+		return task.runStartedAt
+	}
+	return task.startedAt
 }
 
 func nullInt(n int) any {
@@ -123,20 +131,33 @@ func writeBoard(t *testing.T, tasks []taskRow, events []eventRow, subs []subRow)
 	for _, task := range tasks {
 		_, err := db.Exec(
 			`INSERT INTO tasks (id, title, status, assignee, created_by, created_at,
-			 claim_lock, claim_expires_at, started_at, worker_pid, max_runtime, run_id)
+			 claim_lock, claim_expires, started_at, worker_pid, max_runtime_seconds,
+			 current_run_id)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			task.id, task.title, task.status, nullString(task.assignee), nullString(task.createdBy),
-			task.createdAt.UTC().Format(time.RFC3339), nullString(task.claimLock),
+			task.createdAt.UTC().Unix(), nullString(task.claimLock),
 			nullStamp(task.claimExpires), nullStamp(task.startedAt), nullInt(task.workerPID),
-			nullInt(int(task.maxRuntime/time.Second)), nullString(task.runID))
+			nullInt(int(task.maxRuntime/time.Second)), nullInt(task.runID))
 		if err != nil {
 			t.Fatalf("insert task %s: %v", task.id, err)
+		}
+		if task.runID == 0 {
+			continue
+		}
+		if _, err := db.Exec(
+			`INSERT INTO task_runs (id, task_id, profile, status, claim_lock, claim_expires,
+			 max_runtime_seconds, started_at)
+			 VALUES (?, ?, ?, 'running', ?, ?, ?, ?)`,
+			task.runID, task.id, nullString(task.assignee), nullString(task.claimLock),
+			nullStamp(task.claimExpires), nullInt(int(task.maxRuntime/time.Second)),
+			runStart(task).UTC().Unix()); err != nil {
+			t.Fatalf("insert run for %s: %v", task.id, err)
 		}
 	}
 	for _, event := range events {
 		if _, err := db.Exec(
 			`INSERT INTO task_events (task_id, kind, created_at) VALUES (?, ?, ?)`,
-			event.taskID, event.kind, event.createdAt.UTC().Format(time.RFC3339)); err != nil {
+			event.taskID, event.kind, event.createdAt.UTC().Unix()); err != nil {
 			t.Fatalf("insert event %s/%s: %v", event.taskID, event.kind, err)
 		}
 	}
@@ -146,7 +167,7 @@ func writeBoard(t *testing.T, tasks []taskRow, events []eventRow, subs []subRow)
 			 chat_type, notifier_profile, delivery_mode, created_at)
 			 VALUES (?, ?, ?, ?, ?, ?, 'notify+wake', ?)`,
 			sub.taskID, sub.platform, sub.chatID, sub.threadID, sub.chatType,
-			sub.notifierProfile, sub.createdAt.UTC().Format(time.RFC3339)); err != nil {
+			sub.notifierProfile, sub.createdAt.UTC().Unix()); err != nil {
 			t.Fatalf("insert sub %s: %v", sub.taskID, err)
 		}
 	}
@@ -216,7 +237,7 @@ func TestRunning(t *testing.T) {
 		StartedAt:    now.Add(-5 * time.Minute),
 		ClaimExpires: now.Add(15 * time.Minute),
 		MaxRuntime:   2 * time.Hour,
-		RunID:        "run-1",
+		RunID:        "1",
 	}
 	if got.ID != want.ID || got.Assignee != want.Assignee || got.WorkerPID != want.WorkerPID ||
 		got.RunID != want.RunID || got.MaxRuntime != want.MaxRuntime ||
@@ -239,6 +260,40 @@ func TestRunningWithoutMaxRuntime(t *testing.T) {
 	}
 	if running[0].MaxRuntime != 0 || !running[0].ClaimExpires.IsZero() {
 		t.Fatalf("running card = %+v, want zero max runtime and claim expiry", running[0])
+	}
+}
+
+func TestRunningMeasuresFromTheActiveRun(t *testing.T) {
+	tasks := baseTasks()
+	tasks[2].startedAt = now.Add(-3 * time.Hour)
+	tasks[2].runStartedAt = now.Add(-5 * time.Minute)
+	reader := openBoard(t, tasks, nil, nil)
+	running, err := reader.Running(context.Background())
+	if err != nil {
+		t.Fatalf("running: %v", err)
+	}
+	if len(running) != 1 {
+		t.Fatalf("running = %+v, want one card", running)
+	}
+	if !running[0].StartedAt.Equal(now.Add(-5 * time.Minute)) {
+		t.Fatalf("started at = %v, want the active run's start %v",
+			running[0].StartedAt, now.Add(-5*time.Minute))
+	}
+}
+
+func TestRunningWithoutARun(t *testing.T) {
+	tasks := baseTasks()
+	tasks[2].runID = 0
+	reader := openBoard(t, tasks, nil, nil)
+	running, err := reader.Running(context.Background())
+	if err != nil {
+		t.Fatalf("running: %v", err)
+	}
+	if len(running) != 1 {
+		t.Fatalf("running = %+v, want one card", running)
+	}
+	if running[0].RunID != "" || !running[0].StartedAt.Equal(now.Add(-5*time.Minute)) {
+		t.Fatalf("running card = %+v, want no run id and the task's own start", running[0])
 	}
 }
 
@@ -484,7 +539,7 @@ func TestSize(t *testing.T) {
 func TestOpenIsReadOnly(t *testing.T) {
 	reader := openBoard(t, baseTasks(), nil, nil)
 	_, err := reader.db.ExecContext(context.Background(),
-		`INSERT INTO tasks (id, title, status, created_at) VALUES ('t_new', 'x', 'ready', '2026-09-07T12:00:00Z')`)
+		`INSERT INTO tasks (id, title, status, created_at) VALUES ('t_new', 'x', 'ready', 1788782400)`)
 	if err == nil {
 		t.Fatal("insert through the reader succeeded, want a read-only failure")
 	}

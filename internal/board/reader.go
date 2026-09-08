@@ -91,8 +91,11 @@ func (r *Reader) Counts(ctx context.Context) (map[string]int, error) {
 
 func (r *Reader) Running(ctx context.Context) ([]RunningCard, error) {
 	cards, err := collect(ctx, r.db, scanRunningCard,
-		`SELECT id, assignee, worker_pid, started_at, claim_expires_at, max_runtime, run_id
-		 FROM tasks WHERE status = 'running' ORDER BY id`)
+		`SELECT t.id, t.assignee, t.worker_pid,
+		        COALESCE(r.started_at, t.started_at), t.claim_expires,
+		        t.max_runtime_seconds, t.current_run_id
+		 FROM tasks t LEFT JOIN task_runs r ON r.id = t.current_run_id
+		 WHERE t.status = 'running' ORDER BY t.id`)
 	if err != nil {
 		return nil, fmt.Errorf("list running cards: %w", err)
 	}
@@ -266,11 +269,11 @@ func scanRunningCard(rows *sql.Rows) (RunningCard, error) {
 	}
 	expires, err := stampOf(claimExpires)
 	if err != nil {
-		return RunningCard{}, fmt.Errorf("card %s claim_expires_at: %w", card.ID, err)
+		return RunningCard{}, fmt.Errorf("card %s claim_expires: %w", card.ID, err)
 	}
 	runtime, err := durationOf(maxRuntime)
 	if err != nil {
-		return RunningCard{}, fmt.Errorf("card %s max_runtime: %w", card.ID, err)
+		return RunningCard{}, fmt.Errorf("card %s max_runtime_seconds: %w", card.ID, err)
 	}
 	card.Assignee = assignee.String
 	card.RunID = runID.String
