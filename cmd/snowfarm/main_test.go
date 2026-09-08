@@ -1,26 +1,68 @@
 package main
 
 import (
-	"errors"
+	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 const fixture = "../../internal/roster/testdata/farm.yaml"
 
+// Every command names itself in its errors, so an operator reading the
+// journal knows which one refused.
 func TestRunDispatchesEveryCommand(t *testing.T) {
-	for _, command := range []string{"guard", "reload"} {
+	missing := filepath.Join(t.TempDir(), "absent")
+	for command, args := range map[string][]string{
+		"guard":  {"guard", "--config", missing},
+		"reload": {"reload", "--pidfile", missing},
+	} {
 		t.Run(command, func(t *testing.T) {
-			err := run([]string{command})
-			if !errors.Is(err, errNotImplemented) {
-				t.Fatalf("%s: %v", command, err)
+			err := run(args)
+			if err == nil {
+				t.Fatalf("%s accepted a path that does not exist", command)
 			}
 			if !strings.HasPrefix(err.Error(), command+": ") {
 				t.Fatalf("%s: error does not name the command: %v", command, err)
 			}
 		})
+	}
+}
+
+// `snowfarm reload` reaches the running guard through the pid file the guard
+// wrote, because the guard treats SIGHUP as a reload and nothing else
+// addresses it from another process.
+func TestReloadSignalsThePIDInTheFile(t *testing.T) {
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	defer signal.Stop(hup)
+
+	pidfile := filepath.Join(t.TempDir(), "guard.pid")
+	if err := os.WriteFile(pidfile, fmt.Appendf(nil, "%d\n", os.Getpid()), 0o600); err != nil {
+		t.Fatalf("write pidfile: %v", err)
+	}
+	if err := run([]string{"reload", "--pidfile", pidfile}); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	select {
+	case <-hup:
+	case <-time.After(5 * time.Second):
+		t.Fatal("reload delivered no SIGHUP")
+	}
+}
+
+func TestReloadRefusesAPIDFileThatIsNotOne(t *testing.T) {
+	pidfile := filepath.Join(t.TempDir(), "guard.pid")
+	if err := os.WriteFile(pidfile, []byte("not a pid\n"), 0o600); err != nil {
+		t.Fatalf("write pidfile: %v", err)
+	}
+	err := run([]string{"reload", "--pidfile", pidfile})
+	if err == nil || !strings.Contains(err.Error(), "does not hold a pid") {
+		t.Fatalf("reload: %v", err)
 	}
 }
 

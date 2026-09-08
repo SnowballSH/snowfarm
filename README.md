@@ -11,10 +11,13 @@ stops units, reads the board, and reports.
 
 ## Status
 
-Early scaffold. Today the repository holds the roster schema
-(`internal/roster`) and the command dispatch of `cmd/snowfarm`; every
-subcommand but `version` returns `not implemented`. `farm-claude` is built and
-tested, but nothing has run it on the host yet.
+The supervisor is built: the roster schema, the renderers and the root
+applier, the Discord reconciler and event log, the read-only board reader, the
+dispatch loop and run termination, the schedules, the hygiene sweep, the
+secrets socket, and the guard itself — the manager breaker, the drained
+nightly restarts, the probes, `#farm-control` and the Prometheus endpoint. The
+Claude Code run counters the wrapper writes are not read yet. Nothing has run
+on the host.
 
 ## The roster
 
@@ -47,11 +50,37 @@ the first apply.
 
 ```
 snowfarm plan|apply [--config PATH] [--only a,b,c] [--dry-run] [--start]
-snowfarm guard
-snowfarm reload
-snowfarm secret-env
+snowfarm guard [--config PATH] [--state DIR] [--secrets DIR] [--age-identity PATH]
+               [--socket PATH] [--pins PATH] [--pidfile PATH]
+snowfarm reload [--pidfile PATH]
+snowfarm secret-env [--socket PATH]
 snowfarm version
 ```
+
+## The guard
+
+`snowfarm guard` is the long-running half. It loads the roster, decrypts the
+age files and binds the metrics address **before** it opens a Discord
+connection, so a guard that cannot start costs no session from a bot's daily
+budget. It then reconciles the guild, records the channel ids in
+`<state>/channels.json` for `snowfarm apply` to read, and runs the dispatch
+tick, the schedules, the hygiene sweep, the manager breaker, the nightly
+drained restarts, the model-gateway, Google-token and Hermes-pin probes, the
+secrets socket, and `/metrics` on the roster's `metrics_addr`.
+
+The breaker reads each manager's `gateway.log`: past its turn or
+operator-mention allowance the manager is paused for thirty minutes, a burst
+of Discord 401/403/429 responses stops it until someone resumes it, and a
+Hermes adapter circuit-breaker trip restarts it inside a restart budget and
+only while that manager's own bot still has session starts to spend.
+
+In `#farm-control`, and only from the operator's own account, the farm answers
+`status`, `pause <manager>`, `resume <manager>`, `stop <task>` and `runs`.
+
+`snowfarm reload` sends SIGHUP to the pid in the guard's pid file. The guard
+re-reads `farm.yaml` and the age files and re-registers the schedules, keeping
+its ledger; a `farm.yaml` that no longer validates is refused and the running
+roster kept.
 
 ## `farm-claude`
 

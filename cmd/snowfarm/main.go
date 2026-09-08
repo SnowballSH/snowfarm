@@ -1,13 +1,18 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"strconv"
 	"strings"
+	"syscall"
 
+	"github.com/SnowballSH/snowfarm/internal/guard"
 	"github.com/SnowballSH/snowfarm/internal/roster"
 	"github.com/SnowballSH/snowfarm/internal/secrets"
 	"github.com/SnowballSH/snowfarm/internal/sysops"
@@ -19,8 +24,6 @@ const (
 	usage         = "usage: snowfarm plan|apply|guard|reload|secret-env|version"
 	defaultConfig = "/etc/snowfarm/farm.yaml"
 )
-
-var errNotImplemented = errors.New("not implemented")
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -39,7 +42,7 @@ func run(args []string) error {
 	case "apply":
 		return apply(args[1:])
 	case "guard":
-		return guard(args[1:])
+		return runGuard(args[1:])
 	case "reload":
 		return reload(args[1:])
 	case "secret-env":
@@ -143,9 +146,74 @@ func converge(out io.Writer, opts applyOptions) error {
 	return nil
 }
 
-func guard([]string) error { return fmt.Errorf("guard: %w", errNotImplemented) }
+// runGuard serves until the process is asked to stop. SIGHUP is a reload, not
+// a stop, so it is delivered to the guard rather than ending the context.
+func runGuard(args []string) error {
+	set := flag.NewFlagSet("guard", flag.ContinueOnError)
+	var cfg guard.Config
+	set.StringVar(&cfg.ConfigPath, "config", defaultConfig, "roster to read")
+	set.StringVar(&cfg.StateDir, "state", guard.DefaultStateDir, "directory holding the ledger, the event log and the channel map")
+	set.StringVar(&cfg.SecretsDir, "secrets", guard.DefaultSecretsDir, "directory of the per-agent age files")
+	set.StringVar(&cfg.IdentityPath, "age-identity", guard.DefaultIdentityPath, "age identity that decrypts them")
+	set.StringVar(&cfg.SocketPath, "socket", secrets.DefaultSocket, "socket each agent asks for its own variables on")
+	set.StringVar(&cfg.PinsPath, "pins", guard.DefaultPinsPath, "pins file the Hermes drift probe reads")
+	set.StringVar(&cfg.PIDPath, "pidfile", guard.DefaultPIDPath, "file `snowfarm reload` finds this guard through")
+	err := set.Parse(args)
+	if err == nil && set.NArg() > 0 {
+		err = fmt.Errorf("unexpected argument %q", set.Arg(0))
+	}
+	if err != nil {
+		return fmt.Errorf("guard: %w", err)
+	}
 
-func reload([]string) error { return fmt.Errorf("reload: %w", errNotImplemented) }
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	defer signal.Stop(hup)
+	cfg.Signals = hup
+
+	if err := guard.Run(ctx, cfg); err != nil {
+		return fmt.Errorf("guard: %w", err)
+	}
+	return nil
+}
+
+// reload delivers SIGHUP to the running guard, which re-reads the roster and
+// the age files without dropping the ledger.
+func reload(args []string) error {
+	set := flag.NewFlagSet("reload", flag.ContinueOnError)
+	pidfile := set.String("pidfile", guard.DefaultPIDPath, "file the guard wrote its pid to")
+	err := set.Parse(args)
+	if err == nil && set.NArg() > 0 {
+		err = fmt.Errorf("unexpected argument %q", set.Arg(0))
+	}
+	if err == nil {
+		err = signalGuard(*pidfile)
+	}
+	if err != nil {
+		return fmt.Errorf("reload: %w", err)
+	}
+	return nil
+}
+
+func signalGuard(pidfile string) error {
+	data, err := os.ReadFile(pidfile)
+	if err != nil {
+		return err
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return fmt.Errorf("%s does not hold a pid: %w", pidfile, err)
+	}
+	if pid <= 0 {
+		return fmt.Errorf("%s holds %d, which is not a process", pidfile, pid)
+	}
+	if err := syscall.Kill(pid, syscall.SIGHUP); err != nil {
+		return fmt.Errorf("signal %d: %w", pid, err)
+	}
+	return nil
+}
 
 func secretEnv(args []string) error {
 	set := flag.NewFlagSet("secret-env", flag.ContinueOnError)

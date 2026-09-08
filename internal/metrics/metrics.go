@@ -22,6 +22,24 @@ type Registry struct {
 	CardsStranded          prometheus.Gauge
 	ProfileDrift           *prometheus.GaugeVec
 	NotifySubBlocksTotal   *prometheus.CounterVec
+
+	ManagerUp                *prometheus.GaugeVec
+	ManagerManaged           *prometheus.GaugeVec
+	ManagerRestartsTotal     *prometheus.CounterVec
+	ManagerTurnsTotal        *prometheus.CounterVec
+	ManagerPausesTotal       *prometheus.CounterVec
+	AdapterTripRestartsTotal *prometheus.CounterVec
+	BurstStopsTotal          *prometheus.CounterVec
+
+	BoardBytes             *prometheus.GaugeVec
+	PinDrift               prometheus.Gauge
+	ModelgateKeyAgeSeconds *prometheus.GaugeVec
+	ModelgateReachable     prometheus.Gauge
+	GoogleTokenHealthy     prometheus.Gauge
+
+	ClaudeRunsTotal       *prometheus.CounterVec
+	ClaudeLimitHitsTotal  *prometheus.CounterVec
+	ClaudeRunSecondsTotal *prometheus.CounterVec
 }
 
 func New() *Registry {
@@ -55,6 +73,45 @@ func New() *Registry {
 			"Agents whose rendered profile no longer matches the baseline, or could not be read.", "agent"),
 		NotifySubBlocksTotal: counter("notify_sub_blocks_total",
 			"Notifier subscriptions the hygiene sweep removed, by the worker that forged one and the manager it named.", "worker", "notifier"),
+		ManagerUp: gauge("manager_up",
+			"Manager gateways whose unit the agent's own user manager reports active.", "agent"),
+		ManagerManaged: gauge("manager_managed",
+			"Manager gateways the farm is running: installed with resolved channel ids and not paused.", "agent"),
+		ManagerRestartsTotal: counter("manager_restarts_total",
+			"Manager gateway restarts the guard performed, drained and adapter-trip alike.", "agent"),
+		ManagerTurnsTotal: counter("manager_turns_total",
+			"Mention-bearing turns a manager handled, counted from its gateway log.", "agent"),
+		ManagerPausesTotal: counter("manager_pauses_total",
+			"Manager pauses the guard imposed, by the signal that fired.", "agent", "reason"),
+		AdapterTripRestartsTotal: counter("adapter_trip_restarts_total",
+			"Restarts the guard performed on a Hermes adapter circuit-breaker trip.", "agent"),
+		BurstStopsTotal: counter("burst_stops_total",
+			"Manager gateways stopped for a burst of Discord 401, 403 or 429 responses.", "agent"),
+		BoardBytes: gauge("board_bytes",
+			"Size of the Kanban database and its write-ahead log.", "file"),
+		PinDrift: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "pin_drift",
+			Help:      "1 when the installed Hermes does not report the pinned commit.",
+		}),
+		ModelgateKeyAgeSeconds: gauge("modelgate_key_age_seconds",
+			"Age of each agent's modelgate key, from the mint date the roster records.", "agent"),
+		ModelgateReachable: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "modelgate_reachable",
+			Help:      "1 when the model gateway answered the supervisor's last liveness probe.",
+		}),
+		GoogleTokenHealthy: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "google_token_healthy",
+			Help:      "1 when the Google refresh token passed its last weekly check.",
+		}),
+		ClaudeRunsTotal: counter("claude_runs_total",
+			"Claude Code runs the wrapper recorded, by the agent that ran one and the model it asked for.", "agent", "model"),
+		ClaudeLimitHitsTotal: counter("claude_limit_hits_total",
+			"Claude Code subscription limits the wrapper hit, by lowercased kind: session, weekly, opus or sonnet.", "kind"),
+		ClaudeRunSecondsTotal: counter("claude_run_seconds_total",
+			"Seconds the farm spent inside Claude Code runs, by agent.", "agent"),
 	}
 	r.MustRegister(
 		r.RunsStartedTotal,
@@ -68,6 +125,21 @@ func New() *Registry {
 		r.CardsStranded,
 		r.ProfileDrift,
 		r.NotifySubBlocksTotal,
+		r.ManagerUp,
+		r.ManagerManaged,
+		r.ManagerRestartsTotal,
+		r.ManagerTurnsTotal,
+		r.ManagerPausesTotal,
+		r.AdapterTripRestartsTotal,
+		r.BurstStopsTotal,
+		r.BoardBytes,
+		r.PinDrift,
+		r.ModelgateKeyAgeSeconds,
+		r.ModelgateReachable,
+		r.GoogleTokenHealthy,
+		r.ClaudeRunsTotal,
+		r.ClaudeLimitHitsTotal,
+		r.ClaudeRunSecondsTotal,
 	)
 	return r
 }
