@@ -109,7 +109,7 @@ func New() *Registry {
 		ClaudeRunsTotal: counter("claude_runs_total",
 			"Claude Code runs the wrapper recorded, by the agent that ran one and the model it asked for.", "agent", "model"),
 		ClaudeLimitHitsTotal: counter("claude_limit_hits_total",
-			"Claude Code subscription limits the wrapper hit, by lowercased kind: session, weekly, opus or sonnet.", "kind"),
+			"Claude Code subscription limits the wrapper hit, by lowercased kind: session, weekly, opus, sonnet, fable, credits or unknown.", "kind"),
 		ClaudeRunSecondsTotal: counter("claude_run_seconds_total",
 			"Seconds the farm spent inside Claude Code runs, by agent.", "agent"),
 	}

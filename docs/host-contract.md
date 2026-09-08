@@ -240,7 +240,11 @@ write runs nothing reads.
 - Every run appends one line to `runs/<agent>.jsonl`. The guard folds those
   into `snowfarm_claude_runs_total`, `snowfarm_claude_run_seconds_total` and
   `snowfarm_claude_limit_hits_total`, whose `kind` label is the limit kind
-  lowercased: `session`, `weekly`, `opus` or `sonnet`.
+  lowercased. Seven kinds reach it: `session`, `weekly`, `opus` and `sonnet`
+  are the limit message's own word; `fable` is the Fable notice, `credits` the
+  `credits_required` error, and `unknown` a limit with no readable kind. The
+  wrapper's `marker` kind — a run refused because the farm was already inside
+  a window — is not a limit the run hit and is not counted.
 
 ## systemd
 

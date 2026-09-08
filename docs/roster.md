@@ -10,10 +10,10 @@ in the tables below is checked at load unless its row says otherwise: `plan`,
 refuses the new file and keeps the running one. Validation reports every
 failure at once rather than the first.
 
-Two rules sit outside the load, and their rows say so. That each `skills`
-entry names a skill this supervisor ships is a render check, so only `plan`
-and `apply` reject it and `guard` loads such a roster without complaint. And
-`--only` is a check on the flag, not on the file.
+Two rules sit outside the load. That each `skills` entry names a skill this
+supervisor ships is a render check, so only `plan` and `apply` reject it and
+`guard` loads such a roster without complaint — its row says so. And `--only`
+is a check on the flag, not on the file, described with the flag below.
 
 The paths and permissions the roster's values become are in
 [`host-contract.md`](host-contract.md).
