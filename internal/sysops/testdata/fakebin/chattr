@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+state="${SNOWFARM_FAKEBIN_STATE:?SNOWFARM_FAKEBIN_STATE is unset}"
+list="${state}/immutable"
+[ -f "${list}" ] || : > "${list}"
+op="$1"; shift
+for path in "$@"; do
+  grep -vxF "${path}" "${list}" > "${list}.tmp" || true
+  if [ "${op}" = "+i" ]; then printf '%s\n' "${path}" >> "${list}.tmp"; fi
+  mv "${list}.tmp" "${list}"
+done

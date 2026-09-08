@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+state="${SNOWFARM_FAKEBIN_STATE:?SNOWFARM_FAKEBIN_STATE is unset}"
+for arg in "$@"; do :; done
+printf '%s\n' "${arg}" >> "${state}/groups"
