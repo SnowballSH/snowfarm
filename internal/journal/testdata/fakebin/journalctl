@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+state="${SNOWFARM_FAKEBIN_STATE:?SNOWFARM_FAKEBIN_STATE is unset}"
+{ printf '%s\n' "$0"; for arg in "$@"; do printf '%s\n' "${arg}"; done; } > "${state}/argv"
+
+case "${SNOWFARM_FAKEBIN_MODE:-ok}" in
+  fail) printf 'Failed to add match: Invalid argument\n' >&2; exit 1 ;;
+  empty) exit 0 ;;
+esac
+
+cat <<'JSON'
+{"__CURSOR":"s=1;i=1","__REALTIME_TIMESTAMP":"1757000000123456","_UID":"6003","PRIORITY":"6","MESSAGE":"{\"spawned\": [{\"task_id\": \"t_1\"}], \"promoted\": []}"}
+{"__CURSOR":"s=1;i=2","__REALTIME_TIMESTAMP":"1757000001654321","_UID":"6003","PRIORITY":"3","MESSAGE":"Main process exited, code=exited, status=75/n/a"}
+JSON
