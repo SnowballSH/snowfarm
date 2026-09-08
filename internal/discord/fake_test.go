@@ -16,6 +16,7 @@ const (
 	testAtlasApp       = "200000000000000001"
 	testIrisApp        = "200000000000000002"
 	testDisabledMgrApp = "200000000000000003"
+	managerRoleID      = "300000000000000002"
 )
 
 var _ Client = (*fakeClient)(nil)

@@ -16,12 +16,16 @@ var (
 	// exists means the guild is not the model the design assumes.
 	ErrManagedRole = errors.New("a role is managed by a farm application")
 
-	// ErrNoSupervisorRole and ErrMissingPermissions are the two halves of
-	// the F0 ceremony a bot cannot perform for itself: the operator creates
-	// the Supervisor role with MANAGE_ROLES and MANAGE_CHANNELS, assigns it
-	// to the supervisor bot, and positions it above Manager.
-	ErrNoSupervisorRole   = errors.New("the Supervisor role does not exist; the operator must create it and assign it to the supervisor bot")
-	ErrMissingPermissions = errors.New("the supervisor bot holds no role granting the permissions reconcile writes with; the operator must assign it the Supervisor role")
+	// These three name the parts of the F0 ceremony a bot cannot perform
+	// for itself: the operator creates the Supervisor role with MANAGE_ROLES
+	// and MANAGE_CHANNELS, assigns it to the supervisor bot, and drags it
+	// above Manager. Discord lets a member manipulate only roles strictly
+	// below its own highest, and Supervisor is the supervisor bot's highest,
+	// so the reconciler can neither raise Supervisor nor move a Manager that
+	// is not already beneath it.
+	ErrNoSupervisorRole         = errors.New("the Supervisor role does not exist; the operator must create it and assign it to the supervisor bot")
+	ErrMissingPermissions       = errors.New("the supervisor bot holds no role granting the permissions reconcile writes with; the operator must assign it the Supervisor role")
+	ErrSupervisorBeneathManager = errors.New("the Supervisor role is not above the Manager role; the operator must drag Supervisor above Manager in Server Settings, Roles")
 )
 
 const (
@@ -147,23 +151,32 @@ func (rc *Reconciler) stripEveryone(ctx context.Context, guild Guild) error {
 
 func (rc *Reconciler) ensureManagerRole(ctx context.Context, guild Guild, supervisor Role) (Role, error) {
 	manager, ok := roleByName(guild.Roles, RoleManager)
-	switch {
-	case !ok:
-		created, err := rc.Client.CreateRole(ctx, RoleManager, ManagerPermissions, reasonRoles)
-		if err != nil {
+	if !ok {
+		if _, err := rc.Client.CreateRole(ctx, RoleManager, ManagerPermissions, reasonRoles); err != nil {
 			return Role{}, fmt.Errorf("create the %s role: %w", RoleManager, err)
 		}
-		manager = created
-	case manager.Permissions != ManagerPermissions:
+		// Discord inserts a new role at the bottom and renumbers the rest,
+		// so both positions below have to come from a fresh read.
+		fresh, err := rc.Client.Guild(ctx)
+		if err != nil {
+			return Role{}, fmt.Errorf("re-read the guild after creating the %s role: %w", RoleManager, err)
+		}
+		if supervisor, ok = roleByName(fresh.Roles, RoleSupervisor); !ok {
+			return Role{}, ErrNoSupervisorRole
+		}
+		if manager, ok = roleByName(fresh.Roles, RoleManager); !ok {
+			return Role{}, fmt.Errorf("the %s role is absent after it was created", RoleManager)
+		}
+	}
+	if manager.Position >= supervisor.Position {
+		return Role{}, fmt.Errorf("%w (%s at position %d, %s at %d)",
+			ErrSupervisorBeneathManager, RoleSupervisor, supervisor.Position, RoleManager, manager.Position)
+	}
+	if manager.Permissions != ManagerPermissions {
 		if err := rc.Client.EditRole(ctx, manager.ID, ManagerPermissions, reasonRoles); err != nil {
 			return Role{}, fmt.Errorf("set %s permissions: %w", RoleManager, err)
 		}
 		manager.Permissions = ManagerPermissions
-	}
-	if manager.Position >= supervisor.Position {
-		if err := rc.Client.PositionRoles(ctx, []string{supervisor.ID, manager.ID}, reasonRoles); err != nil {
-			return Role{}, fmt.Errorf("position %s beneath %s: %w", RoleManager, RoleSupervisor, err)
-		}
 	}
 	return manager, nil
 }

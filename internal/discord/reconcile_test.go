@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/SnowballSH/snowfarm/internal/roster"
@@ -44,6 +45,27 @@ func reconcile(t *testing.T, f *fakeClient, r *roster.Roster) State {
 		t.Fatalf("reconcile: %v", err)
 	}
 	return state
+}
+
+func writesOfKind(writes []string, kind string) []string {
+	var out []string
+	for _, w := range writes {
+		if strings.HasPrefix(w, kind+" ") {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+func channelIndex(t *testing.T, f *fakeClient, name string) int {
+	t.Helper()
+	for i := range f.channels {
+		if f.channels[i].Name == name && f.channels[i].Type == ChannelText {
+			return i
+		}
+	}
+	t.Fatalf("no text channel %q", name)
+	return -1
 }
 
 func overwriteFor(t *testing.T, c Channel, id string) Overwrite {
@@ -233,23 +255,139 @@ func TestReconcileAssignsManagerRole(t *testing.T) {
 	}
 }
 
-func TestReconcilePositionsManagerBeneathSupervisor(t *testing.T) {
+// A bot may manipulate only roles strictly below its own highest, and
+// Supervisor is the supervisor bot's highest, so a Manager that is not
+// beneath it is the operator's ceremony to repair, not a write to attempt.
+func TestReconcileNeedsSupervisorAboveManager(t *testing.T) {
+	tests := []struct {
+		name   string
+		guild  func(f *fakeClient)
+		writes []string
+	}{
+		{
+			name:   "the created Manager lands level with a bottom Supervisor",
+			guild:  func(f *fakeClient) { f.roles[1].Position = 1 },
+			writes: []string{"CreateRole " + RoleManager},
+		},
+		{
+			name: "an existing Manager sits above Supervisor",
+			guild: func(f *fakeClient) {
+				f.roles = append(f.roles, Role{
+					ID:          managerRoleID,
+					Name:        RoleManager,
+					Position:    3,
+					Permissions: ManagerPermissions,
+				})
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFake()
+			tc.guild(f)
+
+			rc := &Reconciler{Client: f, Roster: testRoster()}
+			_, err := rc.Reconcile(context.Background())
+			if !errors.Is(err, ErrSupervisorBeneathManager) {
+				t.Fatalf("reconcile error = %v, want %v", err, ErrSupervisorBeneathManager)
+			}
+			if !slices.Equal(f.writes, tc.writes) {
+				t.Errorf("writes = %q, want %q", f.writes, tc.writes)
+			}
+		})
+	}
+}
+
+func TestReconcileRepairsManagerPermissions(t *testing.T) {
 	f := newFake()
-	f.roles[1].Position = 1
+	f.roles = append(f.roles, Role{
+		ID:          managerRoleID,
+		Name:        RoleManager,
+		Position:    1,
+		Permissions: ManagerPermissions | PermMentionEveryone,
+	})
 	r := testRoster()
 
-	reconcile(t, f, r)
+	state := reconcile(t, f, r)
 
-	supervisor, _ := f.role(RoleSupervisor)
-	manager, _ := f.role(RoleManager)
-	if manager.Position >= supervisor.Position {
-		t.Fatalf("Manager at %d, Supervisor at %d", manager.Position, supervisor.Position)
+	if got := state.Roles[RoleManager]; got != managerRoleID {
+		t.Errorf("state Manager id = %q, want the existing role %q", got, managerRoleID)
+	}
+	if got := writesOfKind(f.writes, "EditRole"); !slices.Equal(got, []string{"EditRole " + managerRoleID}) {
+		t.Errorf("role writes = %q, want one EditRole of %s", got, managerRoleID)
+	}
+	if got := writesOfKind(f.writes, "CreateRole"); len(got) != 0 {
+		t.Errorf("a Manager role was created alongside the existing one: %q", got)
+	}
+	manager, ok := f.role(RoleManager)
+	if !ok {
+		t.Fatal("the Manager role vanished")
+	}
+	if manager.Permissions != ManagerPermissions {
+		t.Errorf("Manager permissions = %d, want %d", manager.Permissions, ManagerPermissions)
 	}
 
 	f.writes = nil
 	reconcile(t, f, r)
 	if len(f.writes) != 0 {
-		t.Errorf("positions were written again: %q", f.writes)
+		t.Errorf("the repaired role was written again: %q", f.writes)
+	}
+}
+
+func TestReconcileRepairsDriftedChannels(t *testing.T) {
+	f := newFake()
+	r := testRoster()
+	reconcile(t, f, r)
+
+	// Two shapes of overwrite drift, so both of sameOverwrites' mismatch
+	// branches decide a repair: a differing value, and a missing entry.
+	stripped := channelIndex(t, f, "command")
+	for i, o := range f.channels[stripped].Overwrites {
+		if o.ID == testGuildID {
+			f.channels[stripped].Overwrites[i].Deny = 0
+		}
+	}
+	shortened := channelIndex(t, f, "managers")
+	f.channels[shortened].Overwrites = slices.DeleteFunc(
+		slices.Clone(f.channels[shortened].Overwrites),
+		func(o Overwrite) bool { return o.ID == testOperatorID },
+	)
+	orphaned := channelIndex(t, f, "snowsys-log")
+	f.channels[orphaned].ParentID = ""
+
+	f.writes = nil
+	second := reconcile(t, f, r)
+
+	want := []string{
+		"EditChannel " + f.channels[stripped].ID,
+		"EditChannel " + f.channels[shortened].ID,
+		"EditChannel " + f.channels[orphaned].ID,
+	}
+	if !slices.Equal(f.writes, want) {
+		t.Fatalf("writes = %q, want %q", f.writes, want)
+	}
+	if deny := overwriteFor(t, f.channels[stripped], testGuildID); deny.Deny&PermViewChannel == 0 {
+		t.Errorf("#command still does not deny @everyone VIEW_CHANNEL")
+	}
+	if allow := overwriteFor(t, f.channels[shortened], testOperatorID); allow.Allow&PermViewChannel == 0 {
+		t.Errorf("#managers is still not visible to the operator")
+	}
+	category, ok := f.channel("TEAM · SNOWSYS", ChannelCategory)
+	if !ok {
+		t.Fatal("the TEAM · SNOWSYS category vanished")
+	}
+	if got := f.channels[orphaned].ParentID; got != category.ID {
+		t.Errorf("#snowsys-log parent = %q, want %q", got, category.ID)
+	}
+	if got := second.Channels[ChannelCommand]; got != f.channels[stripped].ID {
+		t.Errorf("state channel %q = %q, want %q", ChannelCommand, got, f.channels[stripped].ID)
+	}
+
+	f.writes = nil
+	reconcile(t, f, r)
+	if len(f.writes) != 0 {
+		t.Errorf("the repaired channels were written again: %q", f.writes)
 	}
 }
 
