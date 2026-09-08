@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,7 +46,8 @@ type Runner struct {
 	Now      func() time.Time
 	Log      *slog.Logger
 
-	mu sync.Mutex
+	mu         sync.Mutex
+	registered []string
 }
 
 func (s *Runner) Start(ctx context.Context) error {
@@ -65,6 +67,15 @@ func (s *Runner) Reload(ctx context.Context) error {
 	return s.rebuild(ctx)
 }
 
+// Scheduled names the schedules the current scheduler holds, in roster order.
+// It is how a caller — and the reload test — sees that a phase flip actually
+// registered a newly enabled agent's crons.
+func (s *Runner) Scheduled() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.registered)
+}
+
 func (s *Runner) Stop() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -77,6 +88,7 @@ func (s *Runner) halt() {
 	}
 	s.cron.Stop()
 	s.cron = nil
+	s.registered = nil
 }
 
 func (s *Runner) rebuild(ctx context.Context) error {
@@ -89,6 +101,7 @@ func (s *Runner) rebuild(ctx context.Context) error {
 		return fmt.Errorf("schedule runner: farm location %q: %w", r.Farm.Location, err)
 	}
 	scheduler := cron.New(cron.WithLocation(loc))
+	s.registered = nil
 	var errs []error
 	for _, sc := range r.Schedules {
 		if !r.IsEnabled(sc.Assignee) || !r.IsEnabled(sc.Notifier) {
@@ -102,6 +115,7 @@ func (s *Runner) rebuild(ctx context.Context) error {
 			continue
 		}
 		scheduler.Schedule(parsed, cron.FuncJob(func() { s.fire(ctx, sc) }))
+		s.registered = append(s.registered, sc.Name)
 	}
 	s.cron = scheduler
 	scheduler.Start()

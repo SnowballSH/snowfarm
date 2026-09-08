@@ -56,6 +56,12 @@ CREATE TABLE IF NOT EXISTS stops (
 	reason  TEXT NOT NULL,
 	at      INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS pauses (
+	agent  TEXT PRIMARY KEY,
+	reason TEXT NOT NULL,
+	at     INTEGER NOT NULL,
+	until  INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS offsets (
 	key    TEXT PRIMARY KEY,
 	offset INTEGER NOT NULL
@@ -193,6 +199,70 @@ func (l *Ledger) Stopped(taskID, unit string) (bool, error) {
 	return stops > 0, nil
 }
 
+// Pause is a manager the guard has stopped. A zero Until is a pause that
+// outlives any interval: the breaker's burst stop and the operator's own
+// pause both end only when someone resumes the manager.
+type Pause struct {
+	Agent  string
+	Reason string
+	At     time.Time
+	Until  time.Time
+}
+
+func (l *Ledger) RecordPause(agent, reason string, at, until time.Time) error {
+	_, err := l.db.Exec(
+		`INSERT INTO pauses (agent, reason, at, until) VALUES (?, ?, ?, ?)
+		 ON CONFLICT(agent) DO UPDATE SET reason = excluded.reason, at = excluded.at,
+		 until = excluded.until`,
+		agent, reason, stamp(at), stamp(until))
+	if err != nil {
+		return fmt.Errorf("record pause of %s: %w", agent, err)
+	}
+	return nil
+}
+
+func (l *Ledger) Paused(agent string) (Pause, bool, error) {
+	row := l.db.QueryRow(`SELECT agent, reason, at, until FROM pauses WHERE agent = ?`, agent)
+	pause, err := scanPause(row)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return Pause{}, false, nil
+	case err != nil:
+		return Pause{}, false, fmt.Errorf("read pause of %s: %w", agent, err)
+	}
+	return pause, true, nil
+}
+
+// Pauses is every manager the guard currently holds down, for the operator's
+// `status` control and for the metric that says a manager is not meant to be
+// up.
+func (l *Ledger) Pauses() ([]Pause, error) {
+	rows, err := l.db.Query(`SELECT agent, reason, at, until FROM pauses ORDER BY agent`)
+	if err != nil {
+		return nil, fmt.Errorf("read pauses: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var pauses []Pause
+	for rows.Next() {
+		pause, err := scanPause(rows)
+		if err != nil {
+			return nil, fmt.Errorf("read pauses: %w", err)
+		}
+		pauses = append(pauses, pause)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read pauses: %w", err)
+	}
+	return pauses, nil
+}
+
+func (l *Ledger) ClearPause(agent string) error {
+	if _, err := l.db.Exec(`DELETE FROM pauses WHERE agent = ?`, agent); err != nil {
+		return fmt.Errorf("clear pause of %s: %w", agent, err)
+	}
+	return nil
+}
+
 func (l *Ledger) Offset(key string) (int64, error) {
 	var offset int64
 	err := l.db.QueryRow(`SELECT offset FROM offsets WHERE key = ?`, key).Scan(&offset)
@@ -248,4 +318,24 @@ func scanPass(row scanner) (Pass, error) {
 	return pass, nil
 }
 
-func stamp(at time.Time) int64 { return at.UTC().UnixNano() }
+func scanPause(row scanner) (Pause, error) {
+	var (
+		pause     Pause
+		at, until int64
+	)
+	if err := row.Scan(&pause.Agent, &pause.Reason, &at, &until); err != nil {
+		return Pause{}, err
+	}
+	pause.At = time.Unix(0, at).UTC()
+	if until != 0 {
+		pause.Until = time.Unix(0, until).UTC()
+	}
+	return pause, nil
+}
+
+func stamp(at time.Time) int64 {
+	if at.IsZero() {
+		return 0
+	}
+	return at.UTC().UnixNano()
+}

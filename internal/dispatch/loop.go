@@ -46,6 +46,7 @@ const (
 
 	reasonMaxRuntime   = "max_runtime"
 	reasonNoMaxRuntime = "no_max_runtime"
+	ReasonOperator     = "operator"
 
 	outcomeRateLimited = "rate_limited"
 
@@ -100,6 +101,25 @@ func (l *Loop) Tick(ctx context.Context) error {
 		l.backstop(ctx, r, running, now),
 		l.classifyFinished(ctx, r, current),
 	)
+}
+
+// Stop ends the run behind one card at the operator's request, through the
+// same path the backstop uses: the unit is stopped, the card reclaimed and
+// blocked, and the outcome posted to the card's own thread. It reads the
+// board rather than the last tick's snapshot, so an operator acting on a card
+// that started since the last tick still reaches it. A card the board does
+// not report running is reported as such rather than treated as stopped.
+func (l *Loop) Stop(ctx context.Context, taskID string) (bool, error) {
+	running, err := l.Board.Running(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, card := range running {
+		if card.ID == taskID {
+			return true, l.stopRun(ctx, card, ReasonOperator, 0, l.now())
+		}
+	}
+	return false, nil
 }
 
 // Running is the in-flight set the last tick read, for the operator's `runs`
@@ -432,10 +452,14 @@ func (l *Loop) adviseStopFailed(ctx context.Context, card board.RunningCard, uni
 }
 
 func stopDetail(reason string, budget time.Duration) string {
-	if reason == reasonNoMaxRuntime {
+	switch reason {
+	case ReasonOperator:
+		return "the operator stopped it"
+	case reasonNoMaxRuntime:
 		return fmt.Sprintf("it was created without a max_runtime and outran the guard's %s default", budget)
+	default:
+		return fmt.Sprintf("it outran its %s max_runtime and Hermes did not end it", budget)
 	}
-	return fmt.Sprintf("it outran its %s max_runtime and Hermes did not end it", budget)
 }
 
 // unitFor names the unit to stop: the ledger knows it for every run this
