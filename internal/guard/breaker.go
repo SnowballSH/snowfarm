@@ -49,47 +49,111 @@ var burstErrors = regexp.MustCompile(`HTTP (401|403|429)`)
 // gateway.log, as the two turn patterns are.
 var adapterTrip = regexp.MustCompile(`circuit breaker opened`)
 
+// TurnStore persists the turns a manager has open. The offset those turns were
+// read from is durable, so they must be durable too: a guard that restarts
+// never re-reads the lines that opened them, and a restarter reading its
+// in-memory set alone would find every manager quiet and abort a running turn.
+type TurnStore interface {
+	OpenTurns(agent string) ([]time.Time, error)
+	RecordTurnStart(agent string, at time.Time) error
+	CompleteTurn(agent string) error
+	ClearTurns(agent string) error
+}
+
 // Turns is what each manager is doing right now: a turn is open from the line
 // that starts it until the line that completes it, and only that pairing
 // makes a manager safe to restart. A manager turn may run for
 // HERMES_AGENT_TIMEOUT, so the age of a start line proves nothing.
 type Turns struct {
+	Store TurnStore
+
 	mu       sync.Mutex
 	inflight map[string][]time.Time
+	loaded   map[string]bool
 }
 
-func (t *Turns) started(agent string, at time.Time) {
+func (t *Turns) started(agent string, at time.Time) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.inflight == nil {
-		t.inflight = map[string][]time.Time{}
+	if err := t.loadLocked(agent); err != nil {
+		return err
 	}
 	t.inflight[agent] = append(t.inflight[agent], at)
+	if t.Store == nil {
+		return nil
+	}
+	return t.Store.RecordTurnStart(agent, at)
 }
 
-func (t *Turns) completed(agent string) {
+func (t *Turns) completed(agent string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if len(t.inflight[agent]) > 0 {
-		t.inflight[agent] = t.inflight[agent][1:]
+	if err := t.loadLocked(agent); err != nil {
+		return err
 	}
+	if len(t.inflight[agent]) == 0 {
+		return nil
+	}
+	t.inflight[agent] = t.inflight[agent][1:]
+	if t.Store == nil {
+		return nil
+	}
+	return t.Store.CompleteTurn(agent)
 }
 
 // open reports the start of the oldest turn that has not been completed.
-func (t *Turns) open(agent string) (time.Time, bool) {
+func (t *Turns) open(agent string) (time.Time, bool, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if len(t.inflight[agent]) == 0 {
-		return time.Time{}, false
+	if err := t.loadLocked(agent); err != nil {
+		return time.Time{}, false, err
 	}
-	return t.inflight[agent][0], true
+	if len(t.inflight[agent]) == 0 {
+		return time.Time{}, false, nil
+	}
+	return t.inflight[agent][0], true, nil
 }
 
 // reset forgets a manager's open turns, which is what a restart does to them.
-func (t *Turns) reset(agent string) {
+func (t *Turns) reset(agent string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	delete(t.inflight, agent)
+	if t.loaded == nil {
+		t.loaded = map[string]bool{}
+	}
+	t.loaded[agent] = true
+	if t.Store == nil {
+		return nil
+	}
+	return t.Store.ClearTurns(agent)
+}
+
+// loadLocked reads the manager's open turns from the store once, so a guard
+// that has just started takes up the set the one before it left.
+func (t *Turns) loadLocked(agent string) error {
+	if t.inflight == nil {
+		t.inflight = map[string][]time.Time{}
+	}
+	if t.loaded == nil {
+		t.loaded = map[string]bool{}
+	}
+	if t.loaded[agent] {
+		return nil
+	}
+	t.loaded[agent] = true
+	if t.Store == nil {
+		return nil
+	}
+	open, err := t.Store.OpenTurns(agent)
+	if err != nil {
+		t.loaded[agent] = false
+		return err
+	}
+	if len(open) > 0 {
+		t.inflight[agent] = open
+	}
+	return nil
 }
 
 // Breaker reads each manager's gateway log and acts on what it finds: a
@@ -166,26 +230,34 @@ func (b *Breaker) sweep(ctx context.Context, r *roster.Roster, manager roster.Ag
 
 // read tails the manager's gateway log from where the last pass stopped. A
 // log that does not exist is a manager that has never run, which is a state
-// and not a fault.
+// and not a fault. A log the ledger holds no offset for — this guard's first
+// pass over it — and one the reader found rotated in place are both armed
+// rather than classified: everything already in the file was written before
+// the guard was watching, and folding an existing log into one rate window
+// would pause every manager on it, stop one for good on a burst it read as
+// current, and spend the restart budget on trips that are long over.
 func (b *Breaker) read(ctx context.Context, r *roster.Roster, manager roster.Agent, p patterns, now time.Time) (int, error) {
 	key := offsetKey(manager.Name)
-	offset, err := b.Ledger.Offset(key)
+	offset, known, err := b.Ledger.Offset(key)
 	if err != nil {
 		return 0, err
 	}
 	path := gatewayLogPath(r, manager)
-	lines, next, err := b.Journal.GatewayLog(ctx, path, offset)
+	tail, err := b.Journal.GatewayLog(ctx, path, offset)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return 0, nil
 	case err != nil:
 		return 0, fmt.Errorf("read %s: %w", path, err)
 	}
-	trips := b.classify(manager.Name, lines, p, now)
-	if next == offset {
-		return trips, nil
+	if !known || tail.Rotated {
+		return 0, b.Ledger.SetOffset(key, tail.Offset)
 	}
-	return trips, b.Ledger.SetOffset(key, next)
+	trips, err := b.classify(manager.Name, tail.Lines, p, now)
+	if tail.Offset == offset {
+		return trips, err
+	}
+	return trips, errors.Join(err, b.Ledger.SetOffset(key, tail.Offset))
 }
 
 // classify reads each line once, stamping it with the time the guard read it
@@ -195,17 +267,18 @@ func (b *Breaker) read(ctx context.Context, r *roster.Roster, manager roster.Age
 // is tested first because the default patterns overlap: a completion line
 // also matches the start pattern, and reading it as a start would leave a
 // turn open forever.
-func (b *Breaker) classify(agent string, lines []string, p patterns, now time.Time) int {
+func (b *Breaker) classify(agent string, lines []string, p patterns, now time.Time) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	s := b.signalsLocked(agent)
 	trips, turns := 0, 0
+	var errs []error
 	for _, line := range lines {
 		switch {
 		case p.turnComplete != nil && p.turnComplete.MatchString(line):
-			b.Turns.completed(agent)
+			errs = append(errs, b.Turns.completed(agent))
 		case p.turnLog != nil && p.turnLog.MatchString(line):
-			b.Turns.started(agent, now)
+			errs = append(errs, b.Turns.started(agent, now))
 			s.turns = append(s.turns, now)
 			turns++
 		}
@@ -222,7 +295,7 @@ func (b *Breaker) classify(agent string, lines []string, p patterns, now time.Ti
 	if turns > 0 {
 		b.Metrics.ManagerTurnsTotal.WithLabelValues(agent).Add(float64(turns))
 	}
-	return trips
+	return trips, errors.Join(errs...)
 }
 
 // act fires at most one action per manager per pass, in the order of the
@@ -293,7 +366,9 @@ func (b *Breaker) tripRestart(ctx context.Context, r *roster.Roster, agent strin
 		return err
 	}
 	b.recordRestart(agent, now)
-	b.Turns.reset(agent)
+	if err := b.Turns.reset(agent); err != nil {
+		return err
+	}
 	b.Metrics.ManagerRestartsTotal.WithLabelValues(agent).Inc()
 	b.post(ctx, fmt.Sprintf("%s: its Discord adapter tripped its circuit, which never closes on its own, so the gateway was restarted", agent))
 	return nil
@@ -322,7 +397,9 @@ func (b *Breaker) Pause(ctx context.Context, agent, reason string, until time.Ti
 		return err
 	}
 	b.clearSignals(agent)
-	b.Turns.reset(agent)
+	if err := b.Turns.reset(agent); err != nil {
+		return err
+	}
 	b.Metrics.ManagerPausesTotal.WithLabelValues(agent, reason).Inc()
 	return nil
 }

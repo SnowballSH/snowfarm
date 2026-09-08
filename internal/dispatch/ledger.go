@@ -66,6 +66,12 @@ CREATE TABLE IF NOT EXISTS offsets (
 	key    TEXT PRIMARY KEY,
 	offset INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS turns (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	agent      TEXT NOT NULL,
+	started_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_turns_agent ON turns(agent, id);
 CREATE TABLE IF NOT EXISTS notices (
 	kind TEXT NOT NULL,
 	key  TEXT NOT NULL,
@@ -263,16 +269,21 @@ func (l *Ledger) ClearPause(agent string) error {
 	return nil
 }
 
-func (l *Ledger) Offset(key string) (int64, error) {
+// Offset is where a tailer stopped, and whether the ledger holds an offset for
+// it at all. The two differ at the start of a file the guard has never read:
+// resuming from 0 there would replay everything already in it as if it had
+// just been written, so a tailer that counts a rate needs "no offset" and
+// "offset 0" to be distinguishable.
+func (l *Ledger) Offset(key string) (int64, bool, error) {
 	var offset int64
 	err := l.db.QueryRow(`SELECT offset FROM offsets WHERE key = ?`, key).Scan(&offset)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		return 0, nil
+		return 0, false, nil
 	case err != nil:
-		return 0, fmt.Errorf("read offset %s: %w", key, err)
+		return 0, false, fmt.Errorf("read offset %s: %w", key, err)
 	}
-	return offset, nil
+	return offset, true, nil
 }
 
 func (l *Ledger) SetOffset(key string, off int64) error {
@@ -283,6 +294,61 @@ func (l *Ledger) SetOffset(key string, off int64) error {
 		return fmt.Errorf("write offset %s: %w", key, err)
 	}
 	return nil
+}
+
+// RecordTurnStart persists a manager turn the guard has seen begin. The turn
+// is open until its completion line is read: the log offset those lines came
+// from is durable, so the turns derived from them must be durable too, or a
+// guard that restarts reads every manager as between turns and the drained
+// restarter aborts one that is still running.
+func (l *Ledger) RecordTurnStart(agent string, at time.Time) error {
+	_, err := l.db.Exec(`INSERT INTO turns (agent, started_at) VALUES (?, ?)`, agent, stamp(at))
+	if err != nil {
+		return fmt.Errorf("record a turn of %s: %w", agent, err)
+	}
+	return nil
+}
+
+// CompleteTurn closes the oldest turn the manager still has open, which is the
+// pairing a completion line makes.
+func (l *Ledger) CompleteTurn(agent string) error {
+	_, err := l.db.Exec(
+		`DELETE FROM turns WHERE id = (SELECT id FROM turns WHERE agent = ? ORDER BY id LIMIT 1)`, agent)
+	if err != nil {
+		return fmt.Errorf("complete a turn of %s: %w", agent, err)
+	}
+	return nil
+}
+
+// ClearTurns forgets a manager's open turns, which is what restarting or
+// stopping its gateway does to them.
+func (l *Ledger) ClearTurns(agent string) error {
+	if _, err := l.db.Exec(`DELETE FROM turns WHERE agent = ?`, agent); err != nil {
+		return fmt.Errorf("clear the turns of %s: %w", agent, err)
+	}
+	return nil
+}
+
+// OpenTurns is when each of the manager's uncompleted turns started, oldest
+// first.
+func (l *Ledger) OpenTurns(agent string) ([]time.Time, error) {
+	rows, err := l.db.Query(`SELECT started_at FROM turns WHERE agent = ? ORDER BY id`, agent)
+	if err != nil {
+		return nil, fmt.Errorf("read the open turns of %s: %w", agent, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var open []time.Time
+	for rows.Next() {
+		var at int64
+		if err := rows.Scan(&at); err != nil {
+			return nil, fmt.Errorf("read the open turns of %s: %w", agent, err)
+		}
+		open = append(open, time.Unix(0, at).UTC())
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read the open turns of %s: %w", agent, err)
+	}
+	return open, nil
 }
 
 // NoticeOnce reports whether this is the first time the guard has had this to

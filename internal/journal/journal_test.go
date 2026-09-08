@@ -224,58 +224,64 @@ func TestGatewayLogTails(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	read := func(offset int64) ([]string, int64) {
+	read := func(offset int64) Tail {
 		t.Helper()
-		lines, next, err := NewExec("journalctl").GatewayLog(context.Background(), path, offset)
+		tail, err := NewExec("journalctl").GatewayLog(context.Background(), path, offset)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return lines, next
+		return tail
 	}
 
 	write("first\nsecond\n")
-	lines, offset := read(0)
-	if want := []string{"first", "second"}; !slices.Equal(lines, want) {
-		t.Errorf("read %v, want %v", lines, want)
+	tail := read(0)
+	if want := []string{"first", "second"}; !slices.Equal(tail.Lines, want) {
+		t.Errorf("read %v, want %v", tail.Lines, want)
 	}
-	if offset != 13 {
-		t.Errorf("offset %d, want 13", offset)
+	if tail.Offset != 13 || tail.Rotated {
+		t.Errorf("offset %d rotated=%v, want 13 and false", tail.Offset, tail.Rotated)
 	}
 
-	if lines, next := read(offset); len(lines) != 0 || next != offset {
-		t.Errorf("re-reading returned %v at %d, want nothing at %d", lines, next, offset)
+	if again := read(tail.Offset); len(again.Lines) != 0 || again.Offset != tail.Offset {
+		t.Errorf("re-reading returned %v at %d, want nothing at %d", again.Lines, again.Offset, tail.Offset)
 	}
 
 	write("part")
-	lines, next := read(offset)
-	if len(lines) != 0 || next != offset {
-		t.Errorf("a partial line returned %v at %d, want nothing at %d", lines, next, offset)
+	partial := read(tail.Offset)
+	if len(partial.Lines) != 0 || partial.Offset != tail.Offset {
+		t.Errorf("a partial line returned %v at %d, want nothing at %d", partial.Lines, partial.Offset, tail.Offset)
 	}
 
 	write("ial\n")
-	lines, offset = read(offset)
-	if want := []string{"partial"}; !slices.Equal(lines, want) {
-		t.Errorf("read %v, want %v", lines, want)
+	tail = read(tail.Offset)
+	if want := []string{"partial"}; !slices.Equal(tail.Lines, want) {
+		t.Errorf("read %v, want %v", tail.Lines, want)
 	}
-	if offset != 21 {
-		t.Errorf("offset %d, want 21", offset)
+	if tail.Offset != 21 {
+		t.Errorf("offset %d, want 21", tail.Offset)
 	}
 
+	// A file shorter than the offset was rotated in place. What it holds now
+	// was written while the reader was looking elsewhere, so the tail says so
+	// and a caller counting a rate can decline to count it.
 	if err := os.WriteFile(path, []byte("rotated\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	lines, offset = read(offset)
-	if want := []string{"rotated"}; !slices.Equal(lines, want) {
-		t.Errorf("after rotation read %v, want %v", lines, want)
+	tail = read(tail.Offset)
+	if want := []string{"rotated"}; !slices.Equal(tail.Lines, want) {
+		t.Errorf("after rotation read %v, want %v", tail.Lines, want)
 	}
-	if offset != 8 {
-		t.Errorf("offset %d, want 8", offset)
+	if tail.Offset != 8 || !tail.Rotated {
+		t.Errorf("after rotation offset %d rotated=%v, want 8 and true", tail.Offset, tail.Rotated)
+	}
+	if again := read(tail.Offset); again.Rotated {
+		t.Error("a continuing read of a rotated file still reports a rotation")
 	}
 }
 
 func TestGatewayLogBeforeTheGatewayHasRun(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "gateway.log")
-	_, _, err := NewExec("journalctl").GatewayLog(context.Background(), path, 0)
+	_, err := NewExec("journalctl").GatewayLog(context.Background(), path, 0)
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("GatewayLog returned %v, want a not-exist error", err)
 	}

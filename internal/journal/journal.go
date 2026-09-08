@@ -28,7 +28,18 @@ type Entry struct {
 
 type Reader interface {
 	UserUnit(ctx context.Context, uid int, unit string, since time.Time) ([]Entry, error)
-	GatewayLog(ctx context.Context, path string, offset int64) ([]string, int64, error)
+	GatewayLog(ctx context.Context, path string, offset int64) (Tail, error)
+}
+
+// Tail is one pass over a gateway log: the complete lines written after the
+// offset the caller asked to resume from, the offset to resume from next, and
+// whether the file was shorter than that offset. A shorter file was rotated in
+// place, so its lines are not a continuation of the last pass and a caller
+// counting a rate over them would be counting history as if it were now.
+type Tail struct {
+	Lines   []string
+	Offset  int64
+	Rotated bool
 }
 
 const (
@@ -167,36 +178,39 @@ func (f *field) UnmarshalJSON(data []byte) error {
 // GatewayLog returns the complete lines written after offset and the offset to
 // resume from. A line still being written is left for the next call, and a
 // file shorter than the offset has been rotated, so reading restarts at its
-// beginning.
-func (r *execReader) GatewayLog(_ context.Context, path string, offset int64) ([]string, int64, error) {
+// beginning and the tail says so.
+func (r *execReader) GatewayLog(_ context.Context, path string, offset int64) (Tail, error) {
+	tail := Tail{Offset: offset}
+	if offset < 0 {
+		tail = Tail{Rotated: true}
+	}
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, offset, err
+		return tail, err
 	}
 	defer func() { _ = f.Close() }()
 
 	info, err := f.Stat()
 	if err != nil {
-		return nil, offset, err
+		return tail, err
 	}
-	if offset < 0 || info.Size() < offset {
-		offset = 0
+	if info.Size() < tail.Offset {
+		tail = Tail{Rotated: true}
 	}
-	if _, err := f.Seek(offset, io.SeekStart); err != nil {
-		return nil, offset, err
+	if _, err := f.Seek(tail.Offset, io.SeekStart); err != nil {
+		return tail, err
 	}
 
 	reader := bufio.NewReader(f)
-	var lines []string
 	for {
 		line, err := reader.ReadString('\n')
 		if errors.Is(err, io.EOF) {
-			return lines, offset, nil
+			return tail, nil
 		}
 		if err != nil {
-			return lines, offset, err
+			return tail, err
 		}
-		offset += int64(len(line))
-		lines = append(lines, strings.TrimRight(line, "\r\n"))
+		tail.Offset += int64(len(line))
+		tail.Lines = append(tail.Lines, strings.TrimRight(line, "\r\n"))
 	}
 }

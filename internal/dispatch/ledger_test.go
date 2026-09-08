@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -112,9 +113,15 @@ func TestLedgerResolvesTaskUnitsAndStops(t *testing.T) {
 func TestLedgerKeepsOffsets(t *testing.T) {
 	ledger := openTestLedger(t)
 
-	off, err := ledger.Offset("runs/hestia.jsonl")
-	if err != nil || off != 0 {
-		t.Fatalf("Offset of an unseen key = %d, %v; want 0, nil", off, err)
+	off, known, err := ledger.Offset("runs/hestia.jsonl")
+	if err != nil || off != 0 || known {
+		t.Fatalf("Offset of an unseen key = %d, %v, %v; want 0, false, nil", off, known, err)
+	}
+	if err := ledger.SetOffset("runs/hestia.jsonl", 0); err != nil {
+		t.Fatal(err)
+	}
+	if off, known, err := ledger.Offset("runs/hestia.jsonl"); err != nil || off != 0 || !known {
+		t.Fatalf("Offset after writing 0 = %d, %v, %v; want 0, true, nil", off, known, err)
 	}
 	if err := ledger.SetOffset("runs/hestia.jsonl", 4096); err != nil {
 		t.Fatal(err)
@@ -122,9 +129,49 @@ func TestLedgerKeepsOffsets(t *testing.T) {
 	if err := ledger.SetOffset("runs/hestia.jsonl", 8192); err != nil {
 		t.Fatal(err)
 	}
-	off, err = ledger.Offset("runs/hestia.jsonl")
-	if err != nil || off != 8192 {
-		t.Fatalf("Offset = %d, %v; want 8192", off, err)
+	off, known, err = ledger.Offset("runs/hestia.jsonl")
+	if err != nil || off != 8192 || !known {
+		t.Fatalf("Offset = %d, %v, %v; want 8192, true", off, known, err)
+	}
+}
+
+// The turns a manager has open outlive the guard that read them: they are
+// derived from a durable offset, and a restarted guard that read them as
+// empty would restart a gateway in the middle of a turn.
+func TestLedgerKeepsOpenTurns(t *testing.T) {
+	ledger := openTestLedger(t)
+	at := time.Date(2026, 9, 7, 4, 0, 0, 0, time.UTC)
+
+	if open, err := ledger.OpenTurns("atlas"); err != nil || len(open) != 0 {
+		t.Fatalf("OpenTurns of a manager with none = %v, %v", open, err)
+	}
+	for i := range 3 {
+		if err := ledger.RecordTurnStart("atlas", at.Add(time.Duration(i)*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ledger.RecordTurnStart("iris", at); err != nil {
+		t.Fatal(err)
+	}
+	if err := ledger.CompleteTurn("atlas"); err != nil {
+		t.Fatal(err)
+	}
+	open, err := ledger.OpenTurns("atlas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []time.Time{at.Add(time.Minute), at.Add(2 * time.Minute)}
+	if !slices.EqualFunc(open, want, time.Time.Equal) {
+		t.Fatalf("OpenTurns after one completion = %v, want %v", open, want)
+	}
+	if err := ledger.ClearTurns("atlas"); err != nil {
+		t.Fatal(err)
+	}
+	if open, err := ledger.OpenTurns("atlas"); err != nil || len(open) != 0 {
+		t.Fatalf("OpenTurns after a restart cleared them = %v, %v", open, err)
+	}
+	if open, err := ledger.OpenTurns("iris"); err != nil || len(open) != 1 {
+		t.Fatalf("clearing atlas's turns left iris with %v, %v", open, err)
 	}
 }
 

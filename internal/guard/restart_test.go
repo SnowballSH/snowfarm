@@ -22,12 +22,26 @@ func newRestarter(t *testing.T, at time.Time) (*Restarter, *breakerEnv) {
 		Roster:  env.roster,
 		Units:   env.units,
 		Ledger:  env.ledger,
-		Turns:   &Turns{},
+		Turns:   &Turns{Store: env.ledger},
 		Post:    env.posts.post,
 		Metrics: env.reg,
 		Now:     env.clock.now,
 	}
 	return restarter, env
+}
+
+func startTurn(t *testing.T, turns *Turns, agent string, at time.Time) {
+	t.Helper()
+	if err := turns.started(agent, at); err != nil {
+		t.Fatalf("start a turn of %s: %v", agent, err)
+	}
+}
+
+func completeTurn(t *testing.T, turns *Turns, agent string) {
+	t.Helper()
+	if err := turns.completed(agent); err != nil {
+		t.Fatalf("complete a turn of %s: %v", agent, err)
+	}
 }
 
 func inWindow(hour, minute int) time.Time {
@@ -41,9 +55,9 @@ func inWindow(hour, minute int) time.Time {
 func TestDrainedRestartWaitsForQuiet(t *testing.T) {
 	t.Run("a completed turn is quiet", func(t *testing.T) {
 		restarter, env := newRestarter(t, inWindow(4, 10))
-		restarter.Turns.started("atlas", inWindow(4, 5))
-		restarter.Turns.completed("atlas")
-		restarter.Turns.started("iris", inWindow(4, 6))
+		startTurn(t, restarter.Turns, "atlas", inWindow(4, 5))
+		completeTurn(t, restarter.Turns, "atlas")
+		startTurn(t, restarter.Turns, "iris", inWindow(4, 6))
 
 		if err := restarter.Tick(context.Background()); err != nil {
 			t.Fatalf("tick: %v", err)
@@ -58,8 +72,8 @@ func TestDrainedRestartWaitsForQuiet(t *testing.T) {
 
 	t.Run("an old uncompleted turn is not quiet", func(t *testing.T) {
 		restarter, env := newRestarter(t, inWindow(4, 55))
-		restarter.Turns.started("atlas", inWindow(2, 0))
-		restarter.Turns.started("iris", inWindow(2, 0))
+		startTurn(t, restarter.Turns, "atlas", inWindow(2, 0))
+		startTurn(t, restarter.Turns, "iris", inWindow(2, 0))
 
 		for range 3 {
 			if err := restarter.Tick(context.Background()); err != nil {
@@ -74,8 +88,8 @@ func TestDrainedRestartWaitsForQuiet(t *testing.T) {
 
 	t.Run("the window closing restarts anyway", func(t *testing.T) {
 		restarter, env := newRestarter(t, inWindow(4, 30))
-		restarter.Turns.started("atlas", inWindow(4, 0))
-		restarter.Turns.started("iris", inWindow(4, 0))
+		startTurn(t, restarter.Turns, "atlas", inWindow(4, 0))
+		startTurn(t, restarter.Turns, "iris", inWindow(4, 0))
 		if err := restarter.Tick(context.Background()); err != nil {
 			t.Fatalf("tick inside the window: %v", err)
 		}
@@ -189,5 +203,36 @@ func TestDrainedRestartRefusesWithoutACompletionPattern(t *testing.T) {
 	}
 	if got := env.units.made(); len(got) != 0 {
 		t.Fatalf("restarted with no completion pattern to prove quiet: %v", got)
+	}
+}
+
+// The open turns a guard read are the restarter's only proof that a manager
+// is between them, and the offset they were read from is durable: a restarted
+// guard never re-reads those lines. Kept in memory alone they would be empty
+// after every restart, and the restarter would abort a turn that is still
+// running — the failure the drained restart exists to prevent (S19).
+func TestOpenTurnsSurviveAGuardRestart(t *testing.T) {
+	restarter, env := newRestarter(t, inWindow(4, 10))
+	startTurn(t, restarter.Turns, "atlas", inWindow(3, 55))
+	startTurn(t, restarter.Turns, "iris", inWindow(3, 55))
+	completeTurn(t, restarter.Turns, "iris")
+
+	restarter.Turns = &Turns{Store: env.ledger}
+
+	if err := restarter.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if got := env.units.count("gateway atlas restart"); got != 0 {
+		t.Fatalf("a restarted guard aborted atlas's open turn: %d restarts", got)
+	}
+	if got := env.units.count("gateway iris restart"); got != 1 {
+		t.Fatalf("iris restarted %d times, want 1", got)
+	}
+
+	if err := restarter.Turns.reset("atlas"); err != nil {
+		t.Fatalf("reset atlas's turns: %v", err)
+	}
+	if open, err := env.ledger.OpenTurns("atlas"); err != nil || len(open) != 0 {
+		t.Fatalf("a restart left %v open turns behind: %v", open, err)
 	}
 }

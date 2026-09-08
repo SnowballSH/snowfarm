@@ -95,6 +95,36 @@ func appendLog(t *testing.T, r *roster.Roster, name string, lines ...string) {
 	}
 }
 
+// watch is the breaker's first pass over the logs as they already stand: it
+// records where each one ends and acts on nothing, which is what keeps a
+// guard starting on a host that has been running for months from reading the
+// whole history as a rate. Every test that means to exercise a rate arms the
+// breaker first and then writes the lines it is about.
+func watch(t *testing.T, breaker *Breaker, env *breakerEnv) {
+	t.Helper()
+	r := env.roster.Load()
+	for _, manager := range r.EnabledManagers() {
+		appendLog(t, r, manager.Name)
+	}
+	if err := breaker.Tick(context.Background()); err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+}
+
+// rewriteLog replaces an agent's gateway log where it stands, which is what a
+// copytruncate rotation does to it: the file keeps its name and loses what the
+// reader had already accounted for.
+func rewriteLog(t *testing.T, r *roster.Roster, name string, lines ...string) {
+	t.Helper()
+	agent, ok := r.Agent(name)
+	if !ok {
+		t.Fatalf("no agent %s in the fixture", name)
+	}
+	if err := os.WriteFile(gatewayLogPath(r, agent), []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatalf("rewrite %s's log: %v", name, err)
+	}
+}
+
 func turnLine(user string) string {
 	return "2026-09-07T04:00:00Z INFO discord adapter handling message from user " + user + " in channel 500"
 }
@@ -105,6 +135,12 @@ func completeLine(user string) string {
 
 func mentionLine(user string) string {
 	return "2026-09-07T04:00:00Z INFO discord adapter posted reply <@" + user + "> please take a look"
+}
+
+// noiseLine is an ordinary log line no pattern matches, which is what most of
+// a gateway log is.
+func noiseLine() string {
+	return "2026-09-07T04:00:00Z INFO discord adapter idle, waiting for the next message on the gateway"
 }
 
 func burstLine() string {

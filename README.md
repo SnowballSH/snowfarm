@@ -72,7 +72,17 @@ The breaker reads each manager's `gateway.log`: past its turn or
 operator-mention allowance the manager is paused for thirty minutes, a burst
 of Discord 401/403/429 responses stops it until someone resumes it, and a
 Hermes adapter circuit-breaker trip restarts it inside a restart budget and
-only while that manager's own bot still has session starts to spend.
+only while that manager's own bot still has session starts to spend. Its first
+pass over a log it holds no offset for — and the pass after a log is rotated
+in place — records where that log ends and acts on nothing already in it, so a
+guard starting beside managers that have been running for months does not read
+their history as a rate happening now.
+
+A manager is safe to restart only between turns, and a turn is open from its
+start line until its completion line. Those open turns are kept in the ledger
+beside the log offset they were read from: a guard that restarts takes up the
+set the one before it left rather than finding every manager quiet and
+aborting a turn that is still running.
 
 In `#farm-control`, and only from the operator's own account, the farm answers
 `status`, `pause <manager>`, `resume <manager>`, `stop <task>` and `runs`.

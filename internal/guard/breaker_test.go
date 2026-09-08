@@ -43,7 +43,7 @@ func newBreaker(t *testing.T) (*Breaker, *breakerEnv) {
 		Secrets: func(agent string) (map[string]string, bool) {
 			return map[string]string{"DISCORD_BOT_TOKEN": "discord-token-for-" + agent}, true
 		},
-		Turns:   &Turns{},
+		Turns:   &Turns{Store: env.ledger},
 		Post:    env.posts.post,
 		Metrics: env.reg,
 		Now:     env.clock.now,
@@ -62,6 +62,7 @@ func TestTurnCounterPauses(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			breaker, env := newBreaker(t)
+			watch(t, breaker, env)
 			appendLog(t, env.roster.Load(), "atlas", repeat(turnLine(testOperatorID), tc.turns)...)
 
 			if err := breaker.Tick(context.Background()); err != nil {
@@ -100,6 +101,7 @@ func TestTurnCounterPauses(t *testing.T) {
 // with its hour of turns still counted would pause again at once.
 func TestPauseExpiryResumes(t *testing.T) {
 	breaker, env := newBreaker(t)
+	watch(t, breaker, env)
 	appendLog(t, env.roster.Load(), "atlas", repeat(turnLine(testOperatorID), 31)...)
 	if err := breaker.Tick(context.Background()); err != nil {
 		t.Fatalf("tick: %v", err)
@@ -136,6 +138,7 @@ func TestOperatorMentionsPause(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			breaker, env := newBreaker(t)
+			watch(t, breaker, env)
 			appendLog(t, env.roster.Load(), "atlas", repeat(mentionLine(testOperatorID), tc.mentions)...)
 
 			if err := breaker.Tick(context.Background()); err != nil {
@@ -159,6 +162,7 @@ func TestOperatorMentionsPause(t *testing.T) {
 // A mention of someone who is not the operator is ordinary traffic.
 func TestOtherMentionsDoNotPause(t *testing.T) {
 	breaker, env := newBreaker(t)
+	watch(t, breaker, env)
 	appendLog(t, env.roster.Load(), "atlas", repeat(mentionLine(testStranger), 12)...)
 
 	if err := breaker.Tick(context.Background()); err != nil {
@@ -171,6 +175,7 @@ func TestOtherMentionsDoNotPause(t *testing.T) {
 
 func TestBurstStop(t *testing.T) {
 	breaker, env := newBreaker(t)
+	watch(t, breaker, env)
 	appendLog(t, env.roster.Load(), "atlas", repeat(burstLine(), 21)...)
 
 	if err := breaker.Tick(context.Background()); err != nil {
@@ -203,6 +208,7 @@ func TestAdapterTripRestart(t *testing.T) {
 		// the wrong token measures the wrong bot and refuses this restart.
 		env.client.limits["discord-token-for-the-supervisor"] = discord.SessionStartLimit{Total: 1000, Remaining: 5}
 		env.client.limits["discord-token-for-atlas"] = discord.SessionStartLimit{Total: 1000, Remaining: 120}
+		watch(t, breaker, env)
 		appendLog(t, env.roster.Load(), "atlas", tripLine())
 
 		if err := breaker.Tick(context.Background()); err != nil {
@@ -216,6 +222,7 @@ func TestAdapterTripRestart(t *testing.T) {
 	t.Run("waits when the session budget is low", func(t *testing.T) {
 		breaker, env := newBreaker(t)
 		env.client.limits["discord-token-for-atlas"] = discord.SessionStartLimit{Total: 1000, Remaining: 40}
+		watch(t, breaker, env)
 		appendLog(t, env.roster.Load(), "atlas", tripLine())
 
 		if err := breaker.Tick(context.Background()); err != nil {
@@ -232,6 +239,7 @@ func TestAdapterTripRestart(t *testing.T) {
 	t.Run("refuses the seventh trip in six hours", func(t *testing.T) {
 		breaker, env := newBreaker(t)
 		env.client.limits["discord-token-for-atlas"] = discord.SessionStartLimit{Total: 1000, Remaining: 900}
+		watch(t, breaker, env)
 		for trip := range 7 {
 			appendLog(t, env.roster.Load(), "atlas", tripLine())
 			if err := breaker.Tick(context.Background()); err != nil {
@@ -255,6 +263,7 @@ func TestPauseThresholdsAreExact(t *testing.T) {
 	r := testRoster(t, t.TempDir())
 	for count := 27; count <= 33; count++ {
 		breaker, env := newBreaker(t)
+		watch(t, breaker, env)
 		appendLog(t, env.roster.Load(), "atlas", repeat(turnLine(testOperatorID), count)...)
 		if err := breaker.Tick(context.Background()); err != nil {
 			t.Fatalf("%d turns: %v", count, err)
@@ -269,6 +278,7 @@ func TestPauseThresholdsAreExact(t *testing.T) {
 	}
 	for count := 3; count <= 9; count++ {
 		breaker, env := newBreaker(t)
+		watch(t, breaker, env)
 		appendLog(t, env.roster.Load(), "atlas", repeat(mentionLine(testOperatorID), count)...)
 		if err := breaker.Tick(context.Background()); err != nil {
 			t.Fatalf("%d mentions: %v", count, err)
@@ -301,18 +311,86 @@ func TestMissingGatewayLogIsQuiet(t *testing.T) {
 // load-bearing.
 func TestTurnsPairCompletionsWithStarts(t *testing.T) {
 	breaker, env := newBreaker(t)
+	watch(t, breaker, env)
 	appendLog(t, env.roster.Load(), "atlas", turnLine(testOperatorID))
 	if err := breaker.Tick(context.Background()); err != nil {
 		t.Fatalf("first tick: %v", err)
 	}
-	if _, open := breaker.Turns.open("atlas"); !open {
-		t.Fatal("a turn that started is not open")
+	if _, open, err := breaker.Turns.open("atlas"); err != nil || !open {
+		t.Fatalf("a turn that started is not open: %v %v", open, err)
 	}
 	appendLog(t, env.roster.Load(), "atlas", completeLine(testOperatorID))
 	if err := breaker.Tick(context.Background()); err != nil {
 		t.Fatalf("second tick: %v", err)
 	}
-	if _, open := breaker.Turns.open("atlas"); open {
-		t.Fatal("a turn whose completion was logged is still open")
+	if _, open, err := breaker.Turns.open("atlas"); err != nil || open {
+		t.Fatalf("a turn whose completion was logged is still open: %v %v", open, err)
+	}
+}
+
+// A guard starting on a host whose managers have been running for months
+// finds a log full of history. Reading it as a rate would pause every manager
+// at once, stop one for good on a burst of refusals long over, and spend the
+// six-hour restart budget on trips nobody is having now, so the first pass
+// over a log this guard holds no offset for records where the log ends and
+// acts on nothing in it.
+func TestBreakerArmsOnTheLogItFinds(t *testing.T) {
+	breaker, env := newBreaker(t)
+	r := env.roster.Load()
+	appendLog(t, r, "atlas", repeat(turnLine(testOperatorID), 200)...)
+	appendLog(t, r, "atlas", repeat(burstLine(), 50)...)
+	appendLog(t, r, "atlas", repeat(tripLine(), 3)...)
+
+	if err := breaker.Tick(context.Background()); err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	if made := env.units.made(); len(made) != 0 {
+		t.Fatalf("the first pass acted on the log it found: %v", made)
+	}
+	if _, paused, err := env.ledger.Paused("atlas"); err != nil || paused {
+		t.Fatalf("a log written before the guard watched paused atlas: paused=%v err=%v", paused, err)
+	}
+	if posts := env.posts.all(); len(posts) != 0 {
+		t.Fatalf("the first pass posted about history: %v", posts)
+	}
+	if _, open, err := breaker.Turns.open("atlas"); err != nil || open {
+		t.Fatalf("history left a turn open: open=%v err=%v", open, err)
+	}
+
+	appendLog(t, r, "atlas", repeat(turnLine(testOperatorID), 31)...)
+	if err := breaker.Tick(context.Background()); err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	if _, paused, err := env.ledger.Paused("atlas"); err != nil || !paused {
+		t.Fatalf("turns taken while the guard watched did not pause atlas: paused=%v err=%v", paused, err)
+	}
+}
+
+// A log rotated in place is the same case as a first pass: the reader starts
+// again at the beginning of a file whose lines the guard was never watching
+// for, so the breaker re-arms on it instead of counting it.
+func TestBreakerArmsAgainOnARotatedLog(t *testing.T) {
+	breaker, env := newBreaker(t)
+	r := env.roster.Load()
+	watch(t, breaker, env)
+	appendLog(t, r, "atlas", repeat(noiseLine(), 300)...)
+	if err := breaker.Tick(context.Background()); err != nil {
+		t.Fatalf("pass over ordinary traffic: %v", err)
+	}
+
+	rewriteLog(t, r, "atlas", repeat(turnLine(testOperatorID), 40)...)
+	if err := breaker.Tick(context.Background()); err != nil {
+		t.Fatalf("pass after the rotation: %v", err)
+	}
+	if _, paused, err := env.ledger.Paused("atlas"); err != nil || paused {
+		t.Fatalf("a rotated log was counted as a rate: paused=%v err=%v", paused, err)
+	}
+
+	appendLog(t, r, "atlas", repeat(turnLine(testOperatorID), 31)...)
+	if err := breaker.Tick(context.Background()); err != nil {
+		t.Fatalf("pass after the rotation was armed: %v", err)
+	}
+	if _, paused, err := env.ledger.Paused("atlas"); err != nil || !paused {
+		t.Fatalf("the breaker stayed deaf after a rotation: paused=%v err=%v", paused, err)
 	}
 }

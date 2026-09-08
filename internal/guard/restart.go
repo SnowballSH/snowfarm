@@ -86,7 +86,11 @@ func (rs *Restarter) pass(ctx context.Context, r *roster.Roster, day string, for
 			rs.mark(manager.Name, day, time.Time{})
 			continue
 		}
-		if _, open := rs.Turns.open(manager.Name); open && !force {
+		_, open, err := rs.Turns.open(manager.Name)
+		if err != nil {
+			return err
+		}
+		if open && !force {
 			continue
 		}
 		if rs.tooSoon(now) {
@@ -96,7 +100,9 @@ func (rs *Restarter) pass(ctx context.Context, r *roster.Roster, day string, for
 			return err
 		}
 		rs.mark(manager.Name, day, now)
-		rs.Turns.reset(manager.Name)
+		if err := rs.Turns.reset(manager.Name); err != nil {
+			return err
+		}
 		rs.Metrics.ManagerRestartsTotal.WithLabelValues(manager.Name).Inc()
 		if force {
 			rs.post(ctx, fmt.Sprintf(

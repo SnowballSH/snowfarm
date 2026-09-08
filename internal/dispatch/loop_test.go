@@ -180,8 +180,8 @@ func (f *fakeJournal) UserUnit(_ context.Context, uid int, unit string, _ time.T
 	return f.fallback, nil
 }
 
-func (f *fakeJournal) GatewayLog(context.Context, string, int64) ([]string, int64, error) {
-	return nil, 0, errors.New("not used")
+func (f *fakeJournal) GatewayLog(context.Context, string, int64) (journal.Tail, error) {
+	return journal.Tail{}, errors.New("not used")
 }
 
 func (f *fakeJournal) set(unit string, entries ...journal.Entry) {

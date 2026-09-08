@@ -292,7 +292,7 @@ func (g *Guard) assemble(r *roster.Roster) {
 		Baseline: filepath.Join(g.cfg.StateDir, profileHashFile),
 		Capacity: g.capacity,
 	}
-	turns := &Turns{}
+	turns := &Turns{Store: g.ledger}
 	g.breaker = &Breaker{
 		Roster:  &g.roster,
 		Units:   g.cfg.Units,
