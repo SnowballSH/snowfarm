@@ -643,14 +643,67 @@ func TestApplyCreatesTheManagerReportJobOnce(t *testing.T) {
 	if err := a.Apply(r, p); err != nil {
 		t.Fatal(err)
 	}
+	if got := cronJobsCreated(c); got != 2 {
+		t.Fatalf("the report job was created %d times, want once per manager", got)
+	}
+}
+
+func cronJobsCreated(c *calls) int {
 	created := 0
 	for _, argv := range c.invocations("runuser") {
 		if slices.Contains(argv, "create") {
 			created++
 		}
 	}
-	if created != 2 {
-		t.Fatalf("the report job was created %d times, want once per manager", created)
+	return created
+}
+
+func TestApplyReportsAFailedCronListing(t *testing.T) {
+	root := t.TempDir()
+	c := recordCalls(t)
+	var warnings strings.Builder
+	a := &Applier{Root: root, Lookup: c.Lookup, Warn: &warnings}
+	r := loadRoster(t)
+	a.Run = func(name string, args ...string) ([]byte, error) {
+		if name == "runuser" && slices.Contains(args, "list") {
+			return nil, errors.New("hermes: the cron store is locked")
+		}
+		return c.Run(name, args...)
+	}
+
+	p, err := a.Plan(r, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Apply(r, p); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"atlas", "iris", render.CronJobName,
+		r.Farm.HermesBin + " cron list", "the cron store is locked",
+	} {
+		if !strings.Contains(warnings.String(), want) {
+			t.Errorf("the failed listing is not reported as %q:\n%s", want, warnings.String())
+		}
+	}
+	if got := cronJobsCreated(c); got != 2 {
+		t.Fatalf("a listing that failed must still create the job: created %d, want one per manager", got)
+	}
+
+	warnings.Reset()
+	a.Run = c.Run
+	p, err = a.Plan(r, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Apply(r, p); err != nil {
+		t.Fatal(err)
+	}
+	if warnings.Len() != 0 {
+		t.Errorf("a listing that succeeds reports nothing, got:\n%s", warnings.String())
+	}
+	if got := cronJobsCreated(c); got != 2 {
+		t.Fatalf("the report job was created %d times, want once per manager", got)
 	}
 }
 

@@ -233,14 +233,22 @@ func (a *Applier) waitForUserManager(uid int) error {
 
 // reportJobs creates each manager's progress report. The manager's own cron
 // store is the record that this ran; a store that cannot be read yet is a
-// first apply, where creating the job is right.
+// first apply, where creating the job is right. Nothing at this pin
+// distinguishes that store from one a host failure hid, so a failed listing is
+// reported and then treated as a miss: the operator sees which manager was
+// probed, and with what, beside the job apply went on to create.
 func (a *Applier) reportJobs(r *roster.Roster, agents []roster.Agent) error {
 	for _, agent := range agents {
 		if agent.Tier != roster.TierManager {
 			continue
 		}
-		out, err := a.run("runuser", hermesArgs(r, agent, "cron", "list")...)
-		if err == nil && strings.Contains(string(out), render.CronJobName) {
+		probe := append([]string{"runuser"}, hermesArgs(r, agent, "cron", "list")...)
+		out, err := a.run(probe[0], probe[1:]...)
+		switch {
+		case err != nil:
+			a.warnf("%s: listing the cron store failed, creating %s anyway: %s: %v",
+				agent.Name, render.CronJobName, strings.Join(probe, " "), err)
+		case strings.Contains(string(out), render.CronJobName):
 			continue
 		}
 		argv, err := render.CronCommand(r, agent, time.Now())

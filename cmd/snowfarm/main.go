@@ -112,7 +112,7 @@ func converge(out io.Writer, opts applyOptions) error {
 	if err := roster.CheckOnly(r, opts.only); err != nil {
 		return err
 	}
-	applier := &sysops.Applier{Only: opts.only, Start: opts.start}
+	applier := &sysops.Applier{Only: opts.only, Start: opts.start, Warn: os.Stderr}
 	channels, err := applier.Channels()
 	if err != nil {
 		return err

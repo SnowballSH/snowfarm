@@ -3,6 +3,7 @@ package sysops
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os/exec"
 	"os/user"
 	"path/filepath"
@@ -26,6 +27,18 @@ type Applier struct {
 	// Start makes Apply start each manager gateway whose unit carries
 	// resolved channel ids.
 	Start bool
+
+	// Warn receives the diagnostics an apply reports without stopping for:
+	// a probe whose failure is indistinguishable from the state it probes
+	// for. A nil Warn discards them.
+	Warn io.Writer
+}
+
+func (a *Applier) warnf(format string, args ...any) {
+	if a.Warn == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(a.Warn, format+"\n", args...)
 }
 
 func (a *Applier) run(name string, args ...string) ([]byte, error) {

@@ -35,16 +35,27 @@ the agent's name for `<agent>`.
 sudo -u farm-<agent> sh -c '
   set -x
   cd /var/lib/farm/<agent>/.hermes/profiles/<agent>
-  : > /tmp/other.yaml
-  rm config.yaml                                            # 1
-  mv /tmp/other.yaml config.yaml                            # 2
+  : > other.yaml                                            # must succeed
+  rm -f config.yaml                                         # 1
+  mv -f other.yaml config.yaml                              # 2
   echo x > config.yaml                                      # 3
   mv /var/lib/farm/<agent>/.hermes /var/lib/farm/<agent>/.hermes.bak   # 4
   mv /var/lib/farm/<agent>/.hermes/profiles/<agent> \
      /var/lib/farm/<agent>/.hermes/profiles/<agent>.old     # 5
   mkdir /var/lib/farm/<agent>/.hermes/profiles/intruder     # 6
+  rm -f other.yaml
 '
 ```
+
+Stage the decoy inside `<hermes_home>`, which the agent owns, and never in
+`/tmp`. `/tmp` is a tmpfs on this host, so `mv` out of it is not `rename(2)`
+at all: it degrades to copy-then-unlink, which opens `config.yaml` for
+writing and fails with `EACCES` on the 0640 `root:farm-<agent>` mode whether
+or not the flag is set. A step that fails either way reports nothing. Step 2
+must be a same-directory rename, which is the operation the flag refuses.
+`-f` on 1 and 2 stops `rm` and `mv` prompting about a target the agent cannot
+write, so each reaches the syscall instead of a question; it suppresses no
+error the drill is looking for.
 
 All six must fail, 1, 2, 4, 5 and 6 with `EPERM` (`Operation not permitted`)
 and 3 with `EPERM`, or `EACCES` once the flag is cleared. Nothing may be
@@ -75,11 +86,24 @@ chattr -i /var/lib/farm/<agent>/.hermes/profiles
 sudo -u farm-<agent> mkdir /var/lib/farm/<agent>/.hermes/profiles/intruder   # succeeds
 rmdir /var/lib/farm/<agent>/.hermes/profiles/intruder
 chattr +i /var/lib/farm/<agent>/.hermes/profiles
+
+chattr -i /var/lib/farm/<agent>/.hermes/profiles/<agent>/config.yaml
+sudo -u farm-<agent> sh -c '
+  cd /var/lib/farm/<agent>/.hermes/profiles/<agent>
+  : > other.yaml
+  mv -f other.yaml config.yaml
+'                                                                            # succeeds
+snowfarm apply --only <agent>
 ```
 
-Operation 6 must succeed with the flag cleared. If it fails either way the
-flag is decorative and the drill proves nothing. Never leave a host in the
-cleared state; run `snowfarm plan` afterwards and confirm it reports no drift.
+Operations 2 and 6 must succeed with the flag cleared: 2 because the agent
+owns `<hermes_home>` and a same-directory rename needs nothing but that, 6
+because the two ancestors are agent-owned rather than root-owned. If either
+fails with the flag gone, that flag is decorative and the drill proves
+nothing. The red side for 2 destroys `config.yaml`, so the `snowfarm apply`
+after it is not optional — it rewrites the file from the roster and sets the
+flag again. Never leave a host in the cleared state; run `snowfarm plan`
+afterwards and confirm it reports no drift.
 
 ## What the drill does not cover
 
