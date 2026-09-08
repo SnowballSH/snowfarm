@@ -18,6 +18,10 @@ type Registry struct {
 	CardsWithoutMaxRuntime *prometheus.GaugeVec
 	DispatchTicksTotal     *prometheus.CounterVec
 	DispatchSkippedTotal   *prometheus.CounterVec
+	Cards                  *prometheus.GaugeVec
+	CardsStranded          prometheus.Gauge
+	ProfileDrift           *prometheus.GaugeVec
+	NotifySubBlocksTotal   *prometheus.CounterVec
 }
 
 func New() *Registry {
@@ -40,6 +44,17 @@ func New() *Registry {
 			"Dispatch passes the guard issued, by kind.", "agent", "kind"),
 		DispatchSkippedTotal: counter("dispatch_skipped_total",
 			"Dispatch opportunities the guard passed over, by reason.", "reason"),
+		Cards: gauge("cards",
+			"Cards on the board at the last hygiene sweep, by status.", "status"),
+		CardsStranded: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "cards_stranded",
+			Help:      "Ready cards the farm had free capacity to claim and did not.",
+		}),
+		ProfileDrift: gauge("profile_drift",
+			"Agents whose rendered profile no longer matches the baseline, or could not be read.", "agent"),
+		NotifySubBlocksTotal: counter("notify_sub_blocks_total",
+			"Notifier subscriptions the hygiene sweep removed, by the worker that forged one and the manager it named.", "worker", "notifier"),
 	}
 	r.MustRegister(
 		r.RunsStartedTotal,
@@ -49,6 +64,10 @@ func New() *Registry {
 		r.CardsWithoutMaxRuntime,
 		r.DispatchTicksTotal,
 		r.DispatchSkippedTotal,
+		r.Cards,
+		r.CardsStranded,
+		r.ProfileDrift,
+		r.NotifySubBlocksTotal,
 	)
 	return r
 }

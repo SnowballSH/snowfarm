@@ -394,7 +394,7 @@ func TestForgedNotifierSubs(t *testing.T) {
 	}
 	want := NotifierSub{
 		TaskID: "t_worker", Platform: "discord", ChatID: "c1",
-		ChatType: "thread", Thread: "th1", NotifierProfile: "atlas",
+		ChatType: "thread", Thread: "th1", NotifierProfile: "atlas", Creator: "hestia",
 	}
 	if forged[0] != want {
 		t.Fatalf("forged = %+v, want %+v", forged[0], want)

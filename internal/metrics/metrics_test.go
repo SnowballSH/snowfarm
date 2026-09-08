@@ -7,7 +7,8 @@ import (
 
 // The scrape config's metric_relabel keep-list and the farm's alert rules name
 // these families literally, so a rename here is invisible until an alert stops
-// evaluating. The list is the subset the dispatch loop publishes.
+// evaluating. The list is the subset the dispatch loop and the hygiene sweep
+// publish.
 func TestRegistryExportsTheDeclaredFamilies(t *testing.T) {
 	reg := New()
 	reg.RunsStartedTotal.WithLabelValues("hestia").Inc()
@@ -16,6 +17,10 @@ func TestRegistryExportsTheDeclaredFamilies(t *testing.T) {
 	reg.CardsWithoutMaxRuntime.WithLabelValues("hestia").Set(1)
 	reg.DispatchTicksTotal.WithLabelValues("hestia", "spawn").Inc()
 	reg.DispatchSkippedTotal.WithLabelValues("farm_cap").Inc()
+	reg.Cards.WithLabelValues("ready").Set(2)
+	reg.CardsStranded.Set(1)
+	reg.ProfileDrift.WithLabelValues("argus").Set(1)
+	reg.NotifySubBlocksTotal.WithLabelValues("hestia", "atlas").Inc()
 
 	families, err := reg.Gather()
 	if err != nil {
@@ -26,9 +31,13 @@ func TestRegistryExportsTheDeclaredFamilies(t *testing.T) {
 		names = append(names, family.GetName())
 	}
 	want := []string{
+		"snowfarm_cards",
+		"snowfarm_cards_stranded",
 		"snowfarm_cards_without_max_runtime",
 		"snowfarm_dispatch_skipped_total",
 		"snowfarm_dispatch_ticks_total",
+		"snowfarm_notify_sub_blocks_total",
+		"snowfarm_profile_drift",
 		"snowfarm_run_stops_total",
 		"snowfarm_runs_finished_total",
 		"snowfarm_runs_in_flight",

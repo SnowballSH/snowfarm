@@ -53,6 +53,7 @@ type NotifierSub struct {
 	ChatType        string
 	Thread          string
 	NotifierProfile string
+	Creator         string
 }
 
 func (s NotifierSub) Target() string {
@@ -154,7 +155,7 @@ func (r *Reader) ForgedNotifierSubs(ctx context.Context, workers, managers []str
 	}
 	forged := filter(rows, func(row notifierRow) bool {
 		return slices.Contains(managers, row.sub.NotifierProfile) &&
-			slices.Contains(workers, row.creator)
+			slices.Contains(workers, row.sub.Creator)
 	})
 	subs := make([]NotifierSub, 0, len(forged))
 	for _, row := range forged {
@@ -210,9 +211,8 @@ const notifierColumns = `s.task_id, s.platform, s.chat_id, s.thread_id, s.chat_t
 	s.notifier_profile, s.created_at, t.created_by`
 
 type notifierRow struct {
-	sub     NotifierSub
-	creator string
-	at      time.Time
+	sub NotifierSub
+	at  time.Time
 }
 
 type statusCount struct {
@@ -301,7 +301,7 @@ func scanNotifierRow(rows *sql.Rows) (notifierRow, error) {
 	row.sub.Thread = thread.String
 	row.sub.ChatType = chatType.String
 	row.sub.NotifierProfile = notifier.String
-	row.creator = creator.String
+	row.sub.Creator = creator.String
 	row.at = when
 	return row, nil
 }
