@@ -711,14 +711,7 @@ func writeChannels(path string, channels map[string]string) error {
 	if err != nil {
 		return err
 	}
-	temp := path + ".tmp"
-	if err := os.WriteFile(temp, append(content, '\n'), channelsMode); err != nil {
-		return err
-	}
-	if err := os.Rename(temp, path); err != nil {
-		return errors.Join(err, os.Remove(temp))
-	}
-	return nil
+	return writeAtomic(path, append(content, '\n'), channelsMode)
 }
 
 // logRecipient encrypts the event log to the guard's own age identity, so the

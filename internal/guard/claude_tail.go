@@ -197,18 +197,8 @@ func (t *ClaudeTail) sweepMarker(ctx context.Context, dir string, newest limit, 
 	return nil
 }
 
-// writeMarker installs the window under a name the wrapper only ever finds
-// whole: a reader that caught a half-written file would read no time at all
-// and fail the run it was meant to refuse.
 func writeMarker(path string, reset time.Time) error {
-	temp := path + ".tmp"
-	if err := os.WriteFile(temp, []byte(reset.UTC().Format(time.RFC3339)+"\n"), markerMode); err != nil {
-		return err
-	}
-	if err := os.Rename(temp, path); err != nil {
-		return errors.Join(err, os.Remove(temp))
-	}
-	return nil
+	return writeAtomic(path, []byte(reset.UTC().Format(time.RFC3339)+"\n"), markerMode)
 }
 
 func removeMarker(path string) error {
