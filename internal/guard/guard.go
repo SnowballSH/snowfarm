@@ -51,6 +51,7 @@ const (
 	pidMode      = fs.FileMode(0o644)
 
 	breakerInterval   = 30 * time.Second
+	claudeInterval    = 30 * time.Second
 	restartInterval   = 30 * time.Second
 	modelgateInterval = time.Minute
 	healthInterval    = time.Minute
@@ -118,22 +119,23 @@ type Guard struct {
 	uids    atomic.Pointer[map[string]int]
 	secrets atomic.Pointer[secrets.Store]
 
-	metrics  *metrics.Registry
-	listener net.Listener
-	ledger   *dispatch.Ledger
-	board    *board.Reader
-	client   discord.Client
-	poster   *discord.Poster
-	store    *discord.LogStore
-	logger   *discord.Logger
-	loop     *dispatch.Loop
-	runner   *schedule.Runner
-	sweep    *hygiene.Sweep
-	breaker  *Breaker
-	restart  *Restarter
-	probes   *Probes
-	controls *Controls
-	socket   *secrets.Server
+	metrics    *metrics.Registry
+	listener   net.Listener
+	ledger     *dispatch.Ledger
+	board      *board.Reader
+	client     discord.Client
+	poster     *discord.Poster
+	store      *discord.LogStore
+	logger     *discord.Logger
+	loop       *dispatch.Loop
+	runner     *schedule.Runner
+	sweep      *hygiene.Sweep
+	breaker    *Breaker
+	restart    *Restarter
+	probes     *Probes
+	controls   *Controls
+	claudeRuns *ClaudeTail
+	socket     *secrets.Server
 }
 
 // New performs every step that must be able to fail before the guard costs a
@@ -340,6 +342,14 @@ func (g *Guard) assemble(r *roster.Roster) {
 		Log:      g.log,
 		Operator: r.Farm.Discord.OperatorUserID,
 	}
+	g.claudeRuns = &ClaudeTail{
+		Roster:  &g.roster,
+		Ledger:  g.ledger,
+		Post:    g.post,
+		Metrics: g.metrics,
+		Now:     g.cfg.Now,
+		Log:     g.log,
+	}
 	g.socket = &secrets.Server{
 		Path:       g.cfg.SocketPath,
 		UIDToAgent: g.agentForUID,
@@ -406,6 +416,9 @@ func (g *Guard) Run(ctx context.Context) error {
 	})
 	start("drained restarts", func(ctx context.Context) error {
 		return g.every(ctx, "drained restart", fixed(restartInterval), g.restart.Tick)
+	})
+	start("claude run log", func(ctx context.Context) error {
+		return g.every(ctx, "claude run log tail", fixed(claudeInterval), g.claudeRuns.Tick)
 	})
 	start("modelgate probe", func(ctx context.Context) error {
 		return g.every(ctx, "modelgate probe", fixed(modelgateInterval), g.probes.Modelgate)

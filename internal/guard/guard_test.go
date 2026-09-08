@@ -45,7 +45,10 @@ func newGuardFixture(t *testing.T, argusEnabled bool) *fixture {
 	dir := t.TempDir()
 	state := filepath.Join(dir, "state")
 	board := filepath.Join(dir, "kanban")
-	for _, path := range []string{state, board, filepath.Join(dir, "secrets"), filepath.Join(dir, "farm")} {
+	for _, path := range []string{
+		state, board, filepath.Join(dir, "secrets"), filepath.Join(dir, "farm"),
+		filepath.Join(dir, "claude", "shared"), filepath.Join(dir, "claude", "runs"),
+	} {
 		if err := os.MkdirAll(path, 0o750); err != nil {
 			t.Fatalf("make %s: %v", path, err)
 		}
