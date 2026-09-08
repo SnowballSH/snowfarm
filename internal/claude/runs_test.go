@@ -14,7 +14,7 @@ import (
 func TestRunsLine(t *testing.T) {
 	h := newHarness(t)
 
-	if code := h.run("-p", "print the git HEAD", "--model", "claude-opus-5", "--effort", "high"); code != ExitOK {
+	if code := h.run("-p", "print the git HEAD", "--model", "claude-fable-5-1", "--effort", "high"); code != ExitOK {
 		t.Fatalf("exit %d on a healthy run, want 0 (stderr: %s)", code, h.stderr.String())
 	}
 	if got := strings.TrimSpace(h.stdout.String()); got != "done: printed the git HEAD" {
@@ -39,7 +39,7 @@ func TestRunsLine(t *testing.T) {
 	}
 	for field, want := range map[string]any{
 		"agent":            "hestia",
-		"model":            "claude-opus-5",
+		"model":            "claude-fable-5-1",
 		"effort":           "high",
 		"num_turns":        float64(3),
 		"duration_ms":      float64(1234),

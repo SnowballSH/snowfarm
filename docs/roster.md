@@ -5,9 +5,15 @@ One `farm.yaml` declares the whole farm. `snowfarm plan`, `snowfarm apply` and
 running guard.
 
 Loading is strict. An unknown key is an error, not a warning, and every rule
-below is checked at load: `plan`, `apply` and `guard` all refuse a roster that
-does not validate, and a reload refuses the new file and keeps the running
-one. Validation reports every failure at once rather than the first.
+in the tables below is checked at load unless its row says otherwise: `plan`,
+`apply` and `guard` all refuse a roster that does not validate, and a reload
+refuses the new file and keeps the running one. Validation reports every
+failure at once rather than the first.
+
+Two rules sit outside the load, and their rows say so. That each `skills`
+entry names a skill this supervisor ships is a render check, so only `plan`
+and `apply` reject it and `guard` loads such a roster without complaint. And
+`--only` is a check on the flag, not on the file.
 
 The paths and permissions the roster's values become are in
 [`host-contract.md`](host-contract.md).
@@ -132,7 +138,7 @@ same uid is a validation error naming both: rename one.
 | `toolsets` | — | must list `terminal` and `skills`, or Claude Code is unreachable; must list `kanban`, without which there is no `kanban_complete` and no card can terminate. One `mcp-<name>` entry per `mcp_servers` entry |
 | `disabled_toolsets` | none | must not list `terminal` or `skills`; on a worker must not list `kanban` |
 | `disabled_tools` | none | a worker must list `skill_manage`, `kanban_create` and `kanban_link` — it keeps the kanban toolset and gives up only those three. Anything else here is added to the tier's own set |
-| `skills` | — | must list `farm-claude-code`, or the skill body never reaches the model. Each entry must be a skill this supervisor ships: `farm-claude-code`, `farm-subscribe` |
+| `skills` | — | must list `farm-claude-code`, or the skill body never reaches the model. Each entry must also be a skill this supervisor ships — `farm-claude-code`, `farm-subscribe` — which `plan` and `apply` check when they render the profile, not the loader |
 | `limits.slice_mib` | — | positive; the agent's slice `MemoryMax`, with `MemoryHigh` at 85% of it |
 | `limits.cpu_percent` | — | positive; the slice `CPUQuota` |
 | `limits.run_mib` | — | positive on a worker; the `MemoryMax` on one transient run |
