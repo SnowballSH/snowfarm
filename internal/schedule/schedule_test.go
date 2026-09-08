@@ -367,15 +367,18 @@ func TestStartRegistersOneEntryPerSchedule(t *testing.T) {
 	if got := tr.cron.Location().String(); got != "America/New_York" {
 		t.Errorf("scheduler location = %q, want America/New_York", got)
 	}
-	wantLocations := []string{"America/New_York", "UTC"}
+	locations := make([]string, 0, len(entries))
 	for i, entry := range entries {
 		spec, ok := entry.Schedule.(*cron.SpecSchedule)
 		if !ok {
 			t.Fatalf("entry %d schedule is %T, want *cron.SpecSchedule", i, entry.Schedule)
 		}
-		if got := spec.Location.String(); got != wantLocations[i] {
-			t.Errorf("entry %d location = %q, want %q", i, got, wantLocations[i])
-		}
+		locations = append(locations, spec.Location.String())
+	}
+	slices.Sort(locations)
+	want := []string{"America/New_York", "UTC"}
+	if !slices.Equal(locations, want) {
+		t.Errorf("entry locations = %q, want %q", locations, want)
 	}
 }
 
