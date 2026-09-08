@@ -22,6 +22,7 @@ import (
 const (
 	logSegmentPrefix     = "events-"
 	logSegmentSuffix     = ".jsonl.age"
+	logSegmentPartial    = ".partial"
 	logSegmentHourLayout = "2006-01-02T15"
 	logSegmentDayLayout  = "2006-01-02"
 	maxSegmentsPerHour   = 9999
@@ -128,8 +129,9 @@ func (s *LogStore) Flush() error {
 	return nil
 }
 
-// Prune deletes every segment whose hour cannot hold an event newer than the
-// cutoff, so nothing inside a kept segment is younger than the retention.
+// Prune deletes every segment, and every partial file a crash orphaned,
+// whose hour cannot hold an event newer than the cutoff, so nothing inside a
+// kept segment is younger than the retention.
 func (s *LogStore) Prune(olderThan time.Duration) error {
 	cutoff := s.now().UTC().Add(-olderThan)
 	entries, err := os.ReadDir(s.dir)
@@ -141,7 +143,7 @@ func (s *LogStore) Prune(olderThan time.Duration) error {
 		if entry.IsDir() {
 			continue
 		}
-		hour, _, ok := parseSegmentName(entry.Name())
+		hour, _, ok := parseSegmentName(strings.TrimSuffix(entry.Name(), logSegmentPartial))
 		if !ok || hour.Add(time.Hour).After(cutoff) {
 			continue
 		}
@@ -152,15 +154,19 @@ func (s *LogStore) Prune(olderThan time.Duration) error {
 	return errors.Join(errs...)
 }
 
+// writeSegment fills a partial file and only then gives it the segment name,
+// so a reader of the directory sees a segment either complete or not at all.
+// The partial name is not a segment name, which is also why the orphan a
+// crash leaves behind is invisible to a reader and swept up by Prune.
 func (s *LogStore) writeSegment(hour string, events []Event) (err error) {
-	file, path, err := s.createSegment(hour)
+	file, partial, path, err := s.createSegment(hour)
 	if err != nil {
 		return err
 	}
 	defer func() {
 		if err != nil {
 			_ = file.Close()
-			_ = os.Remove(path)
+			_ = os.Remove(partial)
 		}
 	}()
 	writer, err := age.Encrypt(file, s.recipient)
@@ -182,26 +188,30 @@ func (s *LogStore) writeSegment(hour string, events []Event) (err error) {
 	if err = file.Close(); err != nil {
 		return fmt.Errorf("close %s: %w", filepath.Base(path), err)
 	}
+	if err = os.Rename(partial, path); err != nil {
+		return fmt.Errorf("publish %s: %w", filepath.Base(path), err)
+	}
 	return nil
 }
 
-func (s *LogStore) createSegment(hour string) (*os.File, string, error) {
+func (s *LogStore) createSegment(hour string) (file *os.File, partial, path string, err error) {
 	seq, err := s.nextSeq(hour)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	for ; seq <= maxSegmentsPerHour; seq++ {
-		path := filepath.Join(s.dir, segmentName(hour, seq))
-		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, logSegmentMode)
+		path = filepath.Join(s.dir, segmentName(hour, seq))
+		partial = path + logSegmentPartial
+		file, err = os.OpenFile(partial, os.O_WRONLY|os.O_CREATE|os.O_EXCL, logSegmentMode)
 		switch {
 		case errors.Is(err, fs.ErrExist):
 			continue
 		case err != nil:
-			return nil, "", fmt.Errorf("create log segment: %w", err)
+			return nil, "", "", fmt.Errorf("create log segment: %w", err)
 		}
-		return file, path, nil
+		return file, partial, path, nil
 	}
-	return nil, "", fmt.Errorf("hour %s already holds %d log segments", hour, maxSegmentsPerHour)
+	return nil, "", "", fmt.Errorf("hour %s already holds %d log segments", hour, maxSegmentsPerHour)
 }
 
 func (s *LogStore) nextSeq(hour string) (int, error) {
@@ -219,27 +229,47 @@ func (s *LogStore) nextSeq(hour string) (int, error) {
 	return highest + 1, nil
 }
 
-// ReadDay concatenates a day's segments in name order. A truncated newest
-// segment is the tail a crash left behind: its whole lines are returned and
-// the break is not an error, while a break anywhere earlier is corruption.
-func ReadDay(identityPath, dir string, day time.Time) ([]Event, error) {
+// DayLog is one day's segments concatenated in name order. Truncated names
+// the newest segment when a crash cut its payload short, and Break is the
+// error that ended that read, so a day the reader had to stop early in is
+// reported rather than handed back as a whole one.
+type DayLog struct {
+	Events    []Event
+	Truncated string
+	Break     error
+}
+
+// ReadDay decrypts a day. The only failure it tolerates is a payload that
+// ends early in the newest segment, which is the tail a crashed writer
+// leaves behind. Everything else is an error wherever it sits: a segment
+// that cannot be opened, one whose age header will not decrypt with the
+// given identity, and a whole line that is not an event — none of which a
+// crash can produce, and any of which would otherwise make an unreadable day
+// look like a quiet one.
+func ReadDay(identityPath, dir string, day time.Time) (DayLog, error) {
 	identities, err := readIdentities(identityPath)
 	if err != nil {
-		return nil, err
+		return DayLog{}, err
 	}
 	names, err := daySegments(dir, day)
 	if err != nil {
-		return nil, err
+		return DayLog{}, err
 	}
-	var events []Event
+	var log DayLog
 	for i, name := range names {
 		read, err := readSegment(filepath.Join(dir, name), identities)
-		events = append(events, read...)
-		if err != nil && i < len(names)-1 {
-			return nil, fmt.Errorf("read log segment %s: %w", name, err)
+		log.Events = append(log.Events, read...)
+		if err == nil {
+			continue
 		}
+		wrapped := fmt.Errorf("read log segment %s: %w", name, err)
+		var broken payloadBreak
+		if i < len(names)-1 || !errors.As(err, &broken) {
+			return DayLog{}, wrapped
+		}
+		log.Truncated, log.Break = name, wrapped
 	}
-	return events, nil
+	return log, nil
 }
 
 func readIdentities(path string) ([]age.Identity, error) {
@@ -254,6 +284,15 @@ func readIdentities(path string) ([]age.Identity, error) {
 	}
 	return identities, nil
 }
+
+// payloadBreak is a read that failed after the file opened and its header
+// decrypted: the ciphertext ended early, or a chunk failed to authenticate.
+// It is the only failure a half-written segment can produce.
+type payloadBreak struct{ err error }
+
+func (b payloadBreak) Error() string { return b.err.Error() }
+
+func (b payloadBreak) Unwrap() error { return b.err }
 
 func readSegment(path string, identities []age.Identity) ([]Event, error) {
 	file, err := os.Open(path)
@@ -273,7 +312,7 @@ func readSegment(path string, identities []age.Identity) ([]Event, error) {
 			if errors.Is(err, io.EOF) && len(line) == 0 {
 				return events, nil
 			}
-			return events, err
+			return events, payloadBreak{err: err}
 		}
 		var event Event
 		if err := json.Unmarshal(line, &event); err != nil {
@@ -286,9 +325,6 @@ func readSegment(path string, identities []age.Identity) ([]Event, error) {
 func daySegments(dir string, day time.Time) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil
-		}
 		return nil, fmt.Errorf("read log directory: %w", err)
 	}
 	prefix := logSegmentPrefix + day.UTC().Format(logSegmentDayLayout) + "T"

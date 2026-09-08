@@ -58,11 +58,14 @@ func messageIDs(events []Event) []string {
 
 func readDay(t *testing.T, identityPath, dir, day string) []Event {
 	t.Helper()
-	events, err := ReadDay(identityPath, dir, at(t, day+"T00:00:00Z"))
+	log, err := ReadDay(identityPath, dir, at(t, day+"T00:00:00Z"))
 	if err != nil {
 		t.Fatalf("read day %s: %v", day, err)
 	}
-	return events
+	if log.Break != nil {
+		t.Fatalf("read day %s broke in %s: %v", day, log.Truncated, log.Break)
+	}
+	return log.Events
 }
 
 func segmentNames(t *testing.T, dir string) []string {
@@ -250,10 +253,14 @@ func TestLogStoreReadsTruncatedNewestSegment(t *testing.T) {
 		t.Fatalf("truncate: %v", err)
 	}
 
-	events, err := ReadDay(identityPath, dir, at(t, testLogDay+"T00:00:00Z"))
+	day, err := ReadDay(identityPath, dir, at(t, testLogDay+"T00:00:00Z"))
 	if err != nil {
 		t.Fatalf("a truncated newest segment must read as a usable tail: %v", err)
 	}
+	if day.Truncated != filepath.Base(newest) || day.Break == nil {
+		t.Fatalf("the tolerated break went unreported: %+v", day)
+	}
+	events := day.Events
 	if len(events) < 2 || len(events) > bulk {
 		t.Fatalf("truncated read returned %d events", len(events))
 	}
@@ -300,5 +307,136 @@ func TestLogStorePruneKeepsAnHourInsideTheRetention(t *testing.T) {
 	}
 	if got := messageIDs(readDay(t, identityPath, dir, testLogDay)); !slices.Equal(got, []string{"1"}) {
 		t.Fatalf("prune took an event one minute old: %v", got)
+	}
+}
+
+func writeOneSegment(t *testing.T, dir, recipient string) {
+	t.Helper()
+	store, err := NewLogStore(LogStoreConfig{
+		Dir:       dir,
+		Recipient: recipient,
+		Now:       func() time.Time { return at(t, "2026-09-07T14:00:00Z") },
+	})
+	if err != nil {
+		t.Fatalf("new log store: %v", err)
+	}
+	store.Append(loggedMessage("1", at(t, "2026-09-07T13:30:00Z")))
+	if err := store.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+}
+
+func TestReadDayRefusesAnIdentityThatCannotDecrypt(t *testing.T) {
+	dir := t.TempDir()
+	recipient, _ := testRecipient(t)
+	writeOneSegment(t, dir, recipient)
+	_, otherIdentity := testRecipient(t)
+
+	day, err := ReadDay(otherIdentity, dir, at(t, testLogDay+"T00:00:00Z"))
+	if err == nil {
+		t.Fatalf("the wrong identity read the day as %d events and no error", len(day.Events))
+	}
+}
+
+func TestReadDayRefusesAMissingDirectory(t *testing.T) {
+	_, identityPath := testRecipient(t)
+	missing := filepath.Join(t.TempDir(), "not-the-log-directory")
+	if _, err := ReadDay(identityPath, missing, at(t, testLogDay+"T00:00:00Z")); err == nil {
+		t.Fatal("a log directory that is not there must be an error, not an empty day")
+	}
+}
+
+func TestReadDayRefusesANewestSegmentWithNoAgeHeader(t *testing.T) {
+	dir := t.TempDir()
+	recipient, identityPath := testRecipient(t)
+	writeOneSegment(t, dir, recipient)
+	newest := filepath.Join(dir, "events-2026-09-07T15-0001.jsonl.age")
+	if err := os.WriteFile(newest, nil, 0o600); err != nil {
+		t.Fatalf("write empty segment: %v", err)
+	}
+
+	if _, err := ReadDay(identityPath, dir, at(t, testLogDay+"T00:00:00Z")); err == nil {
+		t.Fatal("a newest segment that is not an age file must be an error, not a truncated tail")
+	}
+}
+
+func TestReadDayRefusesAnUnreadableNewestSegment(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a mode 000 file")
+	}
+	dir := t.TempDir()
+	recipient, identityPath := testRecipient(t)
+	writeOneSegment(t, dir, recipient)
+	newest := filepath.Join(dir, "events-2026-09-07T15-0001.jsonl.age")
+	if err := os.WriteFile(newest, nil, 0o000); err != nil {
+		t.Fatalf("write unreadable segment: %v", err)
+	}
+
+	if _, err := ReadDay(identityPath, dir, at(t, testLogDay+"T00:00:00Z")); err == nil {
+		t.Fatal("a segment that cannot be opened must be an error, not a truncated tail")
+	}
+}
+
+func TestReadDayRefusesAGarbledLineInTheNewestSegment(t *testing.T) {
+	dir := t.TempDir()
+	recipient, identityPath := testRecipient(t)
+	writeOneSegment(t, dir, recipient)
+
+	newest := filepath.Join(dir, "events-2026-09-07T15-0001.jsonl.age")
+	file, err := os.OpenFile(newest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		t.Fatalf("create segment: %v", err)
+	}
+	parsed, err := age.ParseX25519Recipient(recipient)
+	if err != nil {
+		t.Fatalf("parse recipient: %v", err)
+	}
+	writer, err := age.Encrypt(file, parsed)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	if _, err := writer.Write([]byte("this is not an event\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close segment: %v", err)
+	}
+
+	if _, err := ReadDay(identityPath, dir, at(t, testLogDay+"T00:00:00Z")); err == nil {
+		t.Fatal("a whole line that is not an event must be an error, not a truncated tail")
+	}
+}
+
+func TestLogStorePublishesSegmentsWholeAndPrunesOrphans(t *testing.T) {
+	dir := t.TempDir()
+	recipient, _ := testRecipient(t)
+	store, err := NewLogStore(LogStoreConfig{
+		Dir:       dir,
+		Recipient: recipient,
+		Now:       func() time.Time { return at(t, "2026-09-07T15:00:00Z") },
+	})
+	if err != nil {
+		t.Fatalf("new log store: %v", err)
+	}
+	store.Append(loggedMessage("1", at(t, "2026-09-07T14:30:00Z")))
+	if err := store.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	if got := segmentNames(t, dir); !slices.Equal(got, []string{"events-2026-09-07T14-0001.jsonl.age"}) {
+		t.Fatalf("a finished flush left %v", got)
+	}
+
+	orphan := filepath.Join(dir, "events-2026-09-07T13-0001.jsonl.age.partial")
+	if err := os.WriteFile(orphan, nil, 0o600); err != nil {
+		t.Fatalf("write orphan: %v", err)
+	}
+	if err := store.Prune(time.Hour); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if got := segmentNames(t, dir); !slices.Equal(got, []string{"events-2026-09-07T14-0001.jsonl.age"}) {
+		t.Fatalf("prune left %v", got)
 	}
 }
