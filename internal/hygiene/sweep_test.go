@@ -1,6 +1,7 @@
 package hygiene
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -8,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -333,31 +335,48 @@ func postsMentioning(posts []string, needle string) []string {
 }
 
 func TestSweepBlocksUnknownAssignee(t *testing.T) {
-	h := newHarness(t, testRoster(), []card{
-		{id: "t_1", status: "ready", assignee: "nobody", createdBy: "atlas"},
-		{id: "t_2", status: "ready", assignee: "hestia", createdBy: "atlas"},
-	}, nil)
+	for _, tc := range []struct {
+		status   string
+		assignee string
+	}{
+		{status: "triage", assignee: "nobody"},
+		{status: "todo", assignee: "nobody"},
+		{status: "scheduled", assignee: "default"},
+		{status: "ready", assignee: "nobody"},
+		{status: "review", assignee: "default"},
+	} {
+		t.Run(tc.status+"/"+tc.assignee, func(t *testing.T) {
+			h := newHarness(t, testRoster(), []card{
+				{id: "t_1", status: tc.status, assignee: tc.assignee, createdBy: "atlas"},
+				{id: "t_2", status: tc.status, assignee: "hestia", createdBy: "atlas"},
+			}, nil)
 
-	h.run()
+			h.run()
 
-	blocks := h.units.subverb("block")
-	if len(blocks) != 1 {
-		t.Fatalf("block calls = %+v, want one", blocks)
-	}
-	if blocks[0].agent != "atlas" {
-		t.Errorf("block ran as %q, want atlas", blocks[0].agent)
-	}
-	want := []string{"block", "t_1",
-		`assignee "nobody" is not a farm worker; reassign with hermes kanban assign`,
-		"--kind", "transient"}
-	if !slices.Equal(blocks[0].args, want) {
-		t.Errorf("block argv\n got %q\nwant %q", blocks[0].args, want)
-	}
-	if got := postsMentioning(h.postList(), "t_1"); len(got) != 1 {
-		t.Errorf("posts naming t_1 = %q, want one", got)
-	}
-	if got := postsMentioning(h.postList(), "t_2"); len(got) != 0 {
-		t.Errorf("posts naming t_2 = %q, want none", got)
+			blocks := h.units.subverb("block")
+			if len(blocks) != 1 {
+				t.Fatalf("block calls = %+v, want one", blocks)
+			}
+			if blocks[0].agent != "atlas" {
+				t.Errorf("block ran as %q, want atlas", blocks[0].agent)
+			}
+			want := []string{"block", "t_1",
+				`assignee "` + tc.assignee + `" is not a farm worker; reassign with hermes kanban assign`,
+				"--kind", "transient"}
+			if !slices.Equal(blocks[0].args, want) {
+				t.Errorf("block argv\n got %q\nwant %q", blocks[0].args, want)
+			}
+			posts := postsMentioning(h.postList(), "t_1")
+			if len(posts) != 1 {
+				t.Fatalf("posts naming t_1 = %q, want one", posts)
+			}
+			if !strings.Contains(posts[0], tc.status) {
+				t.Errorf("post %q does not name the status %q", posts[0], tc.status)
+			}
+			if got := postsMentioning(h.postList(), "t_2"); len(got) != 0 {
+				t.Errorf("posts naming t_2 = %q, want none", got)
+			}
+		})
 	}
 }
 
@@ -622,15 +641,38 @@ func writeBaseline(t *testing.T, path, root string, agents ...string) {
 	for _, agent := range agents {
 		dir := filepath.Join(root, agent, ".hermes", "profiles", agent)
 		profiles[agent] = map[string]string{
-			"config": hashOf(t, filepath.Join(dir, "config.yaml")),
-			"soul":   hashOf(t, filepath.Join(dir, "SOUL.md")),
+			"config.yaml": hashOf(t, filepath.Join(dir, "config.yaml")),
+			"SOUL.md":     hashOf(t, filepath.Join(dir, "SOUL.md")),
 		}
 	}
-	data, err := json.Marshal(map[string]any{"profiles": profiles})
+	data, err := json.MarshalIndent(profiles, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal baseline: %v", err)
 	}
-	write(t, path, string(data))
+	write(t, path, string(data)+"\n")
+}
+
+// TestReadsTheBaselineApplyWrites pins the on-disk contract between the writer
+// (internal/sysops' Applier.profileHashFile) and this reader: they share no Go
+// type, and the fixture is a verbatim sample of what apply produced.
+func TestReadsTheBaselineApplyWrites(t *testing.T) {
+	recorded, err := readDigests(filepath.Join("testdata", "profile-hashes.json"))
+	if err != nil {
+		t.Fatalf("read baseline: %v", err)
+	}
+	want := ProfileDigests{
+		"argus": {
+			Config: "c6486022f02b660197603c1cc093ae2e7786274853e25cf5a70217c43589a37e",
+			Soul:   "48c8f5b4097dc7591878e5e92a3adad3e6096511e595dfd466a53e095218f3f3",
+		},
+		"atlas": {
+			Config: "859e447be6a6a9e99d15089746f915a350cff6226aa7b037bfe88bef5af62361",
+			Soul:   "7dfd26ea564e74e147a7ca7d78f60817e77af43172a80e80f924e90970807138",
+		},
+	}
+	if !maps.Equal(recorded, want) {
+		t.Errorf("baseline\n got %+v\nwant %+v", recorded, want)
+	}
 }
 
 func TestSweepDetectsProfileDrift(t *testing.T) {
@@ -690,7 +732,7 @@ func TestSweepTreatsUnreadableAsDrift(t *testing.T) {
 	}
 }
 
-func TestSweepSeedsAnUnrecordedProfile(t *testing.T) {
+func TestSweepReportsAnUnrecordedProfileWithoutWritingTheBaseline(t *testing.T) {
 	h := newHarness(t, testRoster(), nil, nil)
 	if err := os.Remove(h.baseline); err != nil {
 		t.Fatalf("remove baseline: %v", err)
@@ -698,36 +740,62 @@ func TestSweepSeedsAnUnrecordedProfile(t *testing.T) {
 
 	h.run()
 
-	if got := h.postList(); len(got) != 0 {
-		t.Fatalf("first sweep posted %q, want nothing", got)
+	posts := h.postList()
+	if len(posts) != 1 {
+		t.Fatalf("posts = %q, want one naming every unrecorded agent", posts)
 	}
-	data, err := os.ReadFile(h.baseline)
-	if err != nil {
-		t.Fatalf("read baseline: %v", err)
+	for _, agent := range []string{"atlas", "hestia", "argus"} {
+		if !strings.Contains(posts[0], agent) {
+			t.Errorf("post %q does not name %q", posts[0], agent)
+		}
+		if got := gaugeValue(t, h.reg.ProfileDrift, agent); got != 0 {
+			t.Errorf("profile_drift{%s} = %v, want 0: an unrecorded profile is not drift", agent, got)
+		}
 	}
-	var recorded struct {
-		Profiles map[string]struct {
-			Config string `json:"config"`
-			Soul   string `json:"soul"`
-		} `json:"profiles"`
-	}
-	if err := json.Unmarshal(data, &recorded); err != nil {
-		t.Fatalf("decode baseline: %v", err)
-	}
-	if len(recorded.Profiles) != 3 {
-		t.Fatalf("baseline records %d agents, want 3", len(recorded.Profiles))
-	}
-	want := hashOf(t, filepath.Join(h.home, "argus", ".hermes", "profiles", "argus", "config.yaml"))
-	if got := recorded.Profiles["argus"].Config; got != want {
-		t.Errorf("baseline config digest for argus = %q, want %q", got, want)
+	if _, err := os.Stat(h.baseline); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stat baseline: %v, want the sweep to have written nothing", err)
 	}
 
 	write(t, filepath.Join(h.home, "argus", ".hermes", "profiles", "argus", "SOUL.md"), "# not argus\n")
 
 	h.run()
 
-	if got := postsMentioning(h.postList(), "argus"); len(got) != 1 {
-		t.Errorf("posts naming argus = %q, want one after the seeded file changed", got)
+	if got := gaugeValue(t, h.reg.ProfileDrift, "argus"); got != 0 {
+		t.Errorf("profile_drift{argus} = %v, want 0: the sweep adopted a digest it never recorded", got)
+	}
+	if _, err := os.Stat(h.baseline); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stat baseline: %v, want the sweep to have written nothing", err)
+	}
+}
+
+func TestSweepReportsOnlyTheAgentsTheBaselineOmits(t *testing.T) {
+	h := newHarness(t, testRoster(), nil, nil)
+	writeBaseline(t, h.baseline, h.home, "atlas", "hestia")
+	before, err := os.ReadFile(h.baseline)
+	if err != nil {
+		t.Fatalf("read baseline: %v", err)
+	}
+
+	h.run()
+
+	posts := h.postList()
+	if len(posts) != 1 {
+		t.Fatalf("posts = %q, want one", posts)
+	}
+	if !strings.Contains(posts[0], "argus") {
+		t.Errorf("post %q does not name the unrecorded agent", posts[0])
+	}
+	for _, agent := range []string{"atlas", "hestia"} {
+		if strings.Contains(posts[0], agent) {
+			t.Errorf("post %q names the recorded agent %q", posts[0], agent)
+		}
+	}
+	after, err := os.ReadFile(h.baseline)
+	if err != nil {
+		t.Fatalf("read baseline: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("baseline changed:\n got %s\nwant %s", after, before)
 	}
 }
 

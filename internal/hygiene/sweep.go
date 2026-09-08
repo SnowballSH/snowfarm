@@ -35,8 +35,6 @@ const (
 	soulFile   = "SOUL.md"
 
 	statusRunning = "running"
-
-	baselineMode = 0o640
 )
 
 var runUnitName = regexp.MustCompile(`^snowfarm-run-([a-z][a-z0-9-]*)-\d+\.service$`)
@@ -57,15 +55,16 @@ type Sweep struct {
 	UnitForPID func(pid int) (string, error)
 }
 
-// ProfileDigests is the baseline apply records and the sweep compares
-// against: the SHA-256 of each enabled agent's two rendered files.
-type ProfileDigests struct {
-	Profiles map[string]ProfileDigest `json:"profiles"`
-}
+// ProfileDigests is the baseline apply records and the sweep only ever reads:
+// the SHA-256 of each agent's two rendered files, keyed by agent name. The
+// shape is the one internal/sysops writes to
+// /var/lib/snowfarm/profile-hashes.json, and testdata/profile-hashes.json is a
+// verbatim sample of it.
+type ProfileDigests map[string]ProfileDigest
 
 type ProfileDigest struct {
-	Config string `json:"config"`
-	Soul   string `json:"soul"`
+	Config string `json:"config.yaml"`
+	Soul   string `json:"SOUL.md"`
 }
 
 func (h *Sweep) Run(ctx context.Context) error {
@@ -99,18 +98,14 @@ func (h *Sweep) exportCounts(ctx context.Context) error {
 }
 
 // sweepStrangers covers every non-terminal card whose assignee is not a farm
-// worker, "default" among them. It is status-independent because `default` is
-// spawnable by every user: a card caught only once it reaches ready is caught
-// after the run it asked for has already started, so a running one is stopped
-// before it is blocked.
+// worker, "default" among them — triage, todo, scheduled, ready, running and
+// review alike. It is status-independent because `default` is spawnable by
+// every user: a card caught only once it reaches ready is caught after the run
+// it asked for has already started. The running pass goes first so that a card
+// already in flight is stopped before the queued pass reports it blocked.
 func (h *Sweep) sweepStrangers(ctx context.Context, r *roster.Roster, workers []string, blocked map[string]bool) error {
-	queued, err := h.Board.UnknownAssignees(ctx, workers)
-	errs := []error{err}
-	for _, card := range queued {
-		errs = append(errs, h.blockStranger(ctx, r, card.ID, card.Status, card.Assignee, false, blocked))
-	}
 	running, err := h.Board.Running(ctx)
-	errs = append(errs, err)
+	errs := []error{err}
 	for _, card := range running {
 		if card.Assignee == "" || slices.Contains(workers, card.Assignee) {
 			continue
@@ -118,6 +113,11 @@ func (h *Sweep) sweepStrangers(ctx context.Context, r *roster.Roster, workers []
 		stopped, err := h.stopRun(ctx, card)
 		errs = append(errs, err,
 			h.blockStranger(ctx, r, card.ID, statusRunning, card.Assignee, stopped, blocked))
+	}
+	queued, err := h.Board.UnknownAssignees(ctx, workers)
+	errs = append(errs, err)
+	for _, card := range queued {
+		errs = append(errs, h.blockStranger(ctx, r, card.ID, card.Status, card.Assignee, false, blocked))
 	}
 	return errors.Join(errs...)
 }
@@ -246,43 +246,51 @@ func (h *Sweep) sweepNotifierSubs(ctx context.Context, workers, managers []strin
 // rendered files of every enabled agent against the baseline. A file the
 // sweep cannot read is drift — the flags and the ownership are exactly what a
 // tampering agent would have to defeat, and a read that fails is evidence of
-// that attempt, not of health.
+// that attempt, not of health. The sweep only ever reads the baseline: apply
+// records it, and adopting whatever the filesystem happens to hold would make
+// a tamper detector trust its first observation.
 func (h *Sweep) sweepProfiles(ctx context.Context, r *roster.Roster) error {
 	recorded, err := readDigests(h.Baseline)
 	if err != nil {
 		return err
 	}
-	seeded := false
+	var unrecorded []string
 	for _, agent := range r.EnabledAgents() {
-		drift, adopted := h.checkProfile(ctx, agent, recorded)
-		seeded = seeded || adopted
+		drift, known := h.checkProfile(ctx, agent, recorded)
+		if !known {
+			unrecorded = append(unrecorded, agent.Name)
+		}
 		h.Metrics.ProfileDrift.WithLabelValues(agent.Name).Set(drift)
 	}
-	if !seeded {
-		return nil
+	if len(unrecorded) > 0 {
+		h.post(ctx, fmt.Sprintf(
+			"the profile baseline %s records no digest for %s, so the sweep has nothing to compare their rendered profiles against; apply must record them",
+			h.Baseline, strings.Join(unrecorded, ", ")))
 	}
-	return writeDigests(h.Baseline, recorded)
+	return nil
 }
 
-func (h *Sweep) checkProfile(ctx context.Context, agent roster.Agent, recorded ProfileDigests) (drift float64, adopted bool) {
+// checkProfile reports drift only against a digest apply recorded. An agent
+// the baseline does not name is reported as unrecorded, not as healthy and not
+// as drift: the sweep has nothing to compare against, and its caller says so.
+func (h *Sweep) checkProfile(ctx context.Context, agent roster.Agent, recorded ProfileDigests) (drift float64, known bool) {
 	current, err := h.digestProfile(agent)
 	if err != nil {
 		h.post(ctx, fmt.Sprintf("agent %s: its rendered profile could not be read, which the sweep reads as drift: %v",
 			agent.Name, err))
-		return 1, false
+		return 1, true
 	}
-	want, known := recorded.Profiles[agent.Name]
+	want, known := recorded[agent.Name]
 	if !known {
-		recorded.Profiles[agent.Name] = current
-		return 0, true
+		return 0, false
 	}
 	changed := changedFiles(want, current)
 	if len(changed) == 0 {
-		return 0, false
+		return 0, true
 	}
 	h.post(ctx, fmt.Sprintf("agent %s: its rendered profile no longer matches the baseline (%s); it was changed after apply rendered it",
 		agent.Name, strings.Join(changed, ", ")))
-	return 1, false
+	return 1, true
 }
 
 func changedFiles(want, current ProfileDigest) []string {
@@ -315,10 +323,12 @@ func digest(path string) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// readDigests treats an absent or empty baseline as an empty one: apply
-// creates the file before there is anything to record in it.
+// readDigests treats an absent or empty baseline as an empty one: the file
+// exists before the first apply has rendered anything to record in it. Every
+// agent it does not name is then reported as unrecorded, which is what the
+// sweep can honestly say about a profile it has no baseline for.
 func readDigests(path string) (ProfileDigests, error) {
-	empty := ProfileDigests{Profiles: map[string]ProfileDigest{}}
+	empty := ProfileDigests{}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return empty, nil
@@ -333,41 +343,7 @@ func readDigests(path string) (ProfileDigests, error) {
 	if err := json.Unmarshal(data, &recorded); err != nil {
 		return empty, fmt.Errorf("read profile baseline %s: %w", path, err)
 	}
-	if recorded.Profiles == nil {
-		recorded.Profiles = map[string]ProfileDigest{}
-	}
 	return recorded, nil
-}
-
-func writeDigests(path string, recorded ProfileDigests) (err error) {
-	data, marshalErr := json.Marshal(recorded)
-	if marshalErr != nil {
-		return fmt.Errorf("write profile baseline: %w", marshalErr)
-	}
-	temp, createErr := os.CreateTemp(filepath.Dir(path), ".profile-hashes-*")
-	if createErr != nil {
-		return fmt.Errorf("write profile baseline: %w", createErr)
-	}
-	name := temp.Name()
-	defer func() {
-		if err != nil {
-			err = errors.Join(fmt.Errorf("write profile baseline %s: %w", path, err), os.Remove(name))
-		}
-	}()
-	if err = writeAll(temp, data); err != nil {
-		return err
-	}
-	// #nosec G302 -- apply owns this path as snowfarm:snowfarm 0640, and a
-	// tighter mode written here would show as drift on the next plan.
-	if err = os.Chmod(name, baselineMode); err != nil {
-		return err
-	}
-	return os.Rename(name, path)
-}
-
-func writeAll(file *os.File, data []byte) error {
-	_, err := file.Write(data)
-	return errors.Join(err, file.Close())
 }
 
 func (h *Sweep) block(ctx context.Context, r *roster.Roster, id, reason string, blocked map[string]bool) error {

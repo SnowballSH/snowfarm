@@ -117,7 +117,8 @@ func (r *Reader) Stranded(ctx context.Context, olderThan time.Duration) ([]CardR
 
 func (r *Reader) UnknownAssignees(ctx context.Context, known []string) ([]CardRef, error) {
 	cards, err := collect(ctx, r.db, scanCardRef,
-		`SELECT `+cardColumns+` FROM tasks WHERE status IN ('ready', 'todo') ORDER BY id`)
+		`SELECT `+cardColumns+` FROM tasks
+		 WHERE status NOT IN ('done', 'blocked', 'archived') ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("list unknown assignees: %w", err)
 	}

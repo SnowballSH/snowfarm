@@ -336,13 +336,37 @@ func TestUnknownAssignees(t *testing.T) {
 	}
 }
 
+func TestUnknownAssigneesCoversEveryNonTerminalStatus(t *testing.T) {
+	var tasks []taskRow
+	for _, status := range []string{"triage", "todo", "scheduled", "ready", "running", "review"} {
+		tasks = append(tasks, taskRow{
+			id: "t_" + status, title: status, status: status,
+			assignee: "default", createdBy: "atlas", createdAt: now,
+		})
+	}
+	for _, status := range []string{"done", "blocked", "archived"} {
+		tasks = append(tasks, taskRow{
+			id: "t_gone_" + status, title: status, status: status,
+			assignee: "default", createdBy: "atlas", createdAt: now,
+		})
+	}
+	reader := openBoard(t, tasks, nil, nil)
+	unknown, err := reader.UnknownAssignees(context.Background(), []string{"hestia"})
+	if err != nil {
+		t.Fatalf("unknown assignees: %v", err)
+	}
+	assertIDs(t, ids(unknown), []string{
+		"t_ready", "t_review", "t_running", "t_scheduled", "t_todo", "t_triage",
+	})
+}
+
 func TestUnknownAssigneesWithoutKnownAgents(t *testing.T) {
 	reader := openBoard(t, baseTasks(), nil, nil)
 	unknown, err := reader.UnknownAssignees(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("unknown assignees: %v", err)
 	}
-	assertIDs(t, ids(unknown), []string{"t_fresh", "t_stale"})
+	assertIDs(t, ids(unknown), []string{"t_fresh", "t_running", "t_stale"})
 }
 
 func TestCrossCreated(t *testing.T) {
