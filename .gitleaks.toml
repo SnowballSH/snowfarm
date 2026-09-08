@@ -1,0 +1,12 @@
+[extend]
+useDefault = true
+
+# Test fixtures that the generic rules mistake for credentials: a readable
+# fake Discord token and a scheduled card's example idempotency key. Neither
+# is, or ever was, a real secret.
+[allowlist]
+description = "Fake test fixtures"
+regexes = [
+  '''discord-token-for-the-supervisor''',
+  '''snowsys-morning-2026-09-10''',
+]
