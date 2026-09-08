@@ -13,8 +13,8 @@ stops units, reads the board, and reports.
 
 Early scaffold. Today the repository holds the roster schema
 (`internal/roster`) and the command dispatch of `cmd/snowfarm`; every
-subcommand but `version` returns `not implemented`, and `farm-claude` is not
-built yet.
+subcommand but `version` returns `not implemented`. `farm-claude` is built and
+tested, but nothing has run it on the host yet.
 
 ## The roster
 
@@ -42,6 +42,26 @@ snowfarm reload
 snowfarm secret-env
 snowfarm version
 ```
+
+## `farm-claude`
+
+The wrapper every agent calls to reach Claude Code:
+
+```
+farm-claude -p PROMPT [--model M] [--effort E] [--max-turns N]
+            [--add-dir D]... [--append-system-prompt S]
+```
+
+It takes one of the farm's Claude slots and waits up to twenty minutes for
+one, refuses to start inside a limit window, and passes the containment flags
+and the deny rules no caller can weaken. Every run appends a line to
+`<claude_dir>/runs/<agent>.jsonl`, which is what the guard counts and what it
+writes the farm-wide limit marker from.
+
+The agent is the uid the run is under, and the subscription is
+`CLAUDE_CODE_OAUTH_TOKEN`; neither is a flag. It exits 3 when no slot came
+free, 4 when the farm is already inside a limit window, 5 when the run itself
+hit one, and 1 on any other failure.
 
 ## Development
 

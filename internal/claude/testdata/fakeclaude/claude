@@ -1,0 +1,36 @@
+#!/bin/sh
+set -eu
+
+if [ -n "${FAKE_CLAUDE_ARGV:-}" ]; then
+  : > "${FAKE_CLAUDE_ARGV}"
+  for arg in "$@"; do printf '%s\n' "${arg}" >> "${FAKE_CLAUDE_ARGV}"; done
+fi
+if [ -n "${FAKE_CLAUDE_ENV:-}" ]; then
+  env > "${FAKE_CLAUDE_ENV}"
+fi
+
+case "${FAKE_CLAUDE_MODE:-ok}" in
+  ok)
+    printf '%s\n' '{"type":"system","subtype":"init","model":"claude-fable-5-1"}'
+    printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"num_turns":3,"duration_ms":1234,"total_cost_usd":0.0421,"result":"done: printed the git HEAD"}'
+    ;;
+  limit)
+    if [ -n "${FAKE_CLAUDE_RESETS_AT:-}" ]; then
+      printf '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":%s}}\n' "${FAKE_CLAUDE_RESETS_AT}"
+    fi
+    printf '%s\n' '{"type":"result","subtype":"success","is_error":true,"api_error_status":429,"num_turns":1,"duration_ms":900,"total_cost_usd":0.0009,"result":"You'"'"'ve hit your weekly limit · resets Mon 12:00am"}'
+    exit 1
+    ;;
+  credits)
+    printf '%s\n' '{"type":"result","subtype":"error_during_execution","is_error":true,"errorCode":"credits_required","num_turns":0,"duration_ms":120,"result":"Credits required to continue"}'
+    exit 1
+    ;;
+  error)
+    printf '%s\n' '{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":2,"duration_ms":700,"total_cost_usd":0.0031,"result":"the build failed: undefined: Argv"}'
+    exit 1
+    ;;
+  *)
+    printf 'fake claude: unknown FAKE_CLAUDE_MODE %s\n' "${FAKE_CLAUDE_MODE:-}" >&2
+    exit 2
+    ;;
+esac
