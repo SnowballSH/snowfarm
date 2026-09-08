@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/SnowballSH/snowfarm/internal/roster"
+	"github.com/SnowballSH/snowfarm/internal/secrets"
 	"github.com/SnowballSH/snowfarm/internal/sysops"
 )
 
@@ -146,4 +147,18 @@ func guard([]string) error { return fmt.Errorf("guard: %w", errNotImplemented) }
 
 func reload([]string) error { return fmt.Errorf("reload: %w", errNotImplemented) }
 
-func secretEnv([]string) error { return fmt.Errorf("secret-env: %w", errNotImplemented) }
+func secretEnv(args []string) error {
+	set := flag.NewFlagSet("secret-env", flag.ContinueOnError)
+	socket := set.String("socket", secrets.DefaultSocket, "guard socket to ask")
+	err := set.Parse(args)
+	if err == nil && set.NArg() > 0 {
+		err = fmt.Errorf("unexpected argument %q", set.Arg(0))
+	}
+	if err == nil {
+		err = secrets.PrintEnv(os.Stdout, *socket, secrets.DefaultTimeout)
+	}
+	if err != nil {
+		return fmt.Errorf("secret-env: %w", err)
+	}
+	return nil
+}
