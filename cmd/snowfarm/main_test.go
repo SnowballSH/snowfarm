@@ -11,7 +11,7 @@ import (
 const fixture = "../../internal/roster/testdata/farm.yaml"
 
 func TestRunDispatchesEveryCommand(t *testing.T) {
-	for _, command := range []string{"guard", "reload", "secret-env"} {
+	for _, command := range []string{"guard", "reload"} {
 		t.Run(command, func(t *testing.T) {
 			err := run([]string{command})
 			if !errors.Is(err, errNotImplemented) {
@@ -74,6 +74,13 @@ func TestPlanRefusesStart(t *testing.T) {
 func TestApplyRejectsAPositionalArgument(t *testing.T) {
 	err := run([]string{"apply", "everything"})
 	if err == nil || !strings.Contains(err.Error(), `unexpected argument "everything"`) {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestSecretEnvRejectsAPositionalArgument(t *testing.T) {
+	err := run([]string{"secret-env", "hestia"})
+	if err == nil || !strings.Contains(err.Error(), `unexpected argument "hestia"`) {
 		t.Fatalf("%v", err)
 	}
 }
