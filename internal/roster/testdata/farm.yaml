@@ -162,3 +162,5 @@ guard:
   default_max_runtime: 2h
   hygiene_interval: 5m
   restart_window: "04:00-05:00"
+  turn_log_pattern: '^\S+ .* discord .* handling message from user (\d+) in channel (\d+)'
+  turn_complete_pattern: '^\S+ .* discord .* finished handling message from user (\d+) in channel (\d+)'

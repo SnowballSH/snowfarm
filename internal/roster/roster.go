@@ -135,6 +135,16 @@ type GuardConfig struct {
 	RestartWindow           string   `yaml:"restart_window"`
 	TurnLogPattern          string   `yaml:"turn_log_pattern"`
 	TurnCompletePattern     string   `yaml:"turn_complete_pattern"`
+
+	// DrainedRestarts arms the nightly restart, and defaults off. Arming it
+	// is a claim that the two turn patterns match a real gateway.log: a
+	// restarter that cannot see a turn start and end reads every manager as
+	// quiet and restarts gateways mid-turn.
+	DrainedRestarts *bool `yaml:"drained_restarts"`
+}
+
+func (g GuardConfig) DrainedRestartsArmed() bool {
+	return g.DrainedRestarts != nil && *g.DrainedRestarts
 }
 
 const (
@@ -145,11 +155,6 @@ const (
 	defaultSoulDir    = "/etc/snowfarm/soul"
 
 	defaultRestartWindow = "04:00-05:00"
-
-	// Both patterns are placeholders until the F2 gateway.log sample pins
-	// them; the drained restarter is armed only after that.
-	defaultTurnLogPattern      = `^\S+ .* discord .* handling message from user (\d+) in channel (\d+)`
-	defaultTurnCompletePattern = `^\S+ .* discord .* finished handling message from user (\d+) in channel (\d+)`
 
 	managerIterations = 120
 	workerIterations  = 80
@@ -199,11 +204,13 @@ func (r *Roster) applyDefaults() {
 	defaultDuration(&r.Guard.DefaultMaxRuntime, 2*time.Hour)
 	defaultDuration(&r.Guard.HygieneInterval, 5*time.Minute)
 	defaultString(&r.Guard.RestartWindow, defaultRestartWindow)
-	defaultString(&r.Guard.TurnLogPattern, defaultTurnLogPattern)
-	defaultString(&r.Guard.TurnCompletePattern, defaultTurnCompletePattern)
 	if r.Guard.HousekeepingPasses == nil {
 		on := true
 		r.Guard.HousekeepingPasses = &on
+	}
+	if r.Guard.DrainedRestarts == nil {
+		off := false
+		r.Guard.DrainedRestarts = &off
 	}
 
 	for i := range r.Agents {

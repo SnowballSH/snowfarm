@@ -44,7 +44,7 @@ type Restarter struct {
 	mu        sync.Mutex
 	restarted map[string]string
 	last      time.Time
-	disarmed  bool
+	disarmed  string
 }
 
 func (rs *Restarter) Tick(ctx context.Context) error {
@@ -52,14 +52,8 @@ func (rs *Restarter) Tick(ctx context.Context) error {
 	if r == nil {
 		return errors.New("drained restarter: the guard holds no roster")
 	}
-	if r.Guard.RestartWindow == "" {
-		return nil
-	}
-	// Without a completion pattern a turn's end is unobservable, and the
-	// only reading left — the age of its start line — is the one that
-	// aborts running turns.
-	if r.Guard.TurnCompletePattern == "" {
-		rs.disarm()
+	if reason, off := disarmed(r.Guard); off {
+		rs.disarm(reason)
 		return nil
 	}
 	now := rs.now()
@@ -138,14 +132,30 @@ func (rs *Restarter) tooSoon(now time.Time) bool {
 	return !rs.last.IsZero() && now.Sub(rs.last) < restartSpacing
 }
 
-func (rs *Restarter) disarm() {
+// disarmed reports why the nightly restart must not run. The switch and the
+// two patterns are read together: without a start line no turn is ever open
+// and without a completion line no turn ever closes, so an armed restarter
+// missing either reads every manager as quiet and restarts it mid-turn.
+func disarmed(g roster.GuardConfig) (string, bool) {
+	switch {
+	case !g.DrainedRestartsArmed():
+		return "guard.drained_restarts is off", true
+	case g.RestartWindow == "":
+		return "guard.restart_window is empty", true
+	case g.TurnLogPattern == "" || g.TurnCompletePattern == "":
+		return "guard.turn_log_pattern or guard.turn_complete_pattern is empty, so no turn can be proved finished", true
+	}
+	return "", false
+}
+
+func (rs *Restarter) disarm(reason string) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
-	if rs.disarmed {
+	if rs.disarmed == reason {
 		return
 	}
-	rs.disarmed = true
-	rs.log().Warn("the drained restarter is disarmed: guard.turn_complete_pattern is empty, so no turn can be proved finished")
+	rs.disarmed = reason
+	rs.log().Warn("the drained restarter is disarmed", "reason", reason)
 }
 
 func (rs *Restarter) post(ctx context.Context, text string) {

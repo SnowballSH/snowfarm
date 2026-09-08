@@ -84,8 +84,11 @@ func TestDefaultsAreConservative(t *testing.T) {
 	if r.Guard.RestartWindow != "04:00-05:00" {
 		t.Fatalf("restart window %q", r.Guard.RestartWindow)
 	}
-	if r.Guard.TurnLogPattern == "" || r.Guard.TurnCompletePattern == "" {
-		t.Fatalf("turn patterns: %q %q", r.Guard.TurnLogPattern, r.Guard.TurnCompletePattern)
+	if r.Guard.TurnLogPattern != "" || r.Guard.TurnCompletePattern != "" {
+		t.Fatalf("turn patterns are guesses and have no default: %q %q", r.Guard.TurnLogPattern, r.Guard.TurnCompletePattern)
+	}
+	if r.Guard.DrainedRestartsArmed() {
+		t.Fatal("the nightly drained restart must default off")
 	}
 	if r.Farm.HomeRoot != "/var/lib/farm" || r.Farm.KanbanHome != "/srv/snowfarm/kanban" ||
 		r.Farm.ClaudeDir != "/srv/snowfarm/claude" || r.Farm.HermesBin != "/usr/local/bin/hermes" ||
@@ -314,15 +317,67 @@ func TestValidateRejectsMissingMCPToolset(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsEmptyTurnCompletePattern(t *testing.T) {
-	r := load(t, "testdata/farm.yaml")
-	r.Guard.TurnCompletePattern = ""
-	err := r.Validate()
-	if err == nil || !strings.Contains(err.Error(), "turn_complete_pattern") {
-		t.Fatalf("want a turn_complete_pattern rejection, got %v", err)
+// variant writes the committed roster with edit applied and loads it, so a
+// rule about what a farm.yaml may say is proved through Load and not against
+// a struct a test built by hand.
+func variant(t *testing.T, edit func(string) string) (*Roster, error) {
+	t.Helper()
+	data, err := os.ReadFile("testdata/farm.yaml")
+	if err != nil {
+		t.Fatal(err)
 	}
-	r.Guard.RestartWindow = ""
-	if err := r.Validate(); err != nil {
-		t.Fatalf("with the drained restarter disarmed the pattern is optional: %v", err)
+	path := filepath.Join(t.TempDir(), "farm.yaml")
+	if err := os.WriteFile(path, []byte(edit(string(data))), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return Load(path)
+}
+
+func arm(yaml string) string { return yaml + "  drained_restarts: true\n" }
+
+func withoutPattern(field string) func(string) string {
+	return func(yaml string) string {
+		var kept []string
+		for _, line := range strings.Split(yaml, "\n") {
+			if !strings.HasPrefix(line, "  "+field+":") {
+				kept = append(kept, line)
+			}
+		}
+		return strings.Join(kept, "\n")
+	}
+}
+
+// The nightly restart is armed in the file or not at all: the patterns it
+// reads are guesses until a real gateway.log pins them, and a roster that
+// cannot express "off" would have the guard restart both gateways every night
+// on a signal it does not have.
+func TestDrainedRestartsAreArmedFromTheFile(t *testing.T) {
+	shipped, err := variant(t, func(yaml string) string { return yaml })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shipped.Guard.DrainedRestartsArmed() {
+		t.Fatal("the committed roster arms the nightly restart")
+	}
+	armed, err := variant(t, arm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !armed.Guard.DrainedRestartsArmed() {
+		t.Fatal("drained_restarts: true did not arm the nightly restart")
+	}
+}
+
+func TestArmingTheDrainedRestartRequiresBothTurnPatterns(t *testing.T) {
+	for _, field := range []string{"turn_log_pattern", "turn_complete_pattern"} {
+		t.Run(field, func(t *testing.T) {
+			if _, err := variant(t, withoutPattern(field)); err != nil {
+				t.Fatalf("a disarmed roster needs no pattern: %v", err)
+			}
+			_, err := variant(t, func(yaml string) string { return arm(withoutPattern(field)(yaml)) })
+			if err == nil || !strings.Contains(err.Error(), field) {
+				t.Fatalf("want a %s rejection, got %v", field, err)
+			}
+		})
 	}
 }

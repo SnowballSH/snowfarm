@@ -47,6 +47,27 @@ func testRoster(t *testing.T, home string) *roster.Roster {
 	return r
 }
 
+// armedRoster is that fixture with the nightly drained restart switched on in
+// the file, which is how an operator arms it once the turn patterns are
+// pinned. The restarter's tests reach the armed state the same way.
+func armedRoster(t *testing.T, home string) *roster.Roster {
+	t.Helper()
+	data, err := os.ReadFile(rosterFixture)
+	if err != nil {
+		t.Fatalf("read the roster fixture: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "farm.yaml")
+	if err := os.WriteFile(path, append(data, "  drained_restarts: true\n"...), 0o600); err != nil {
+		t.Fatalf("write the armed roster: %v", err)
+	}
+	r, err := roster.Load(path)
+	if err != nil {
+		t.Fatalf("load the armed roster: %v", err)
+	}
+	r.Farm.HomeRoot = home
+	return r
+}
+
 func held(r *roster.Roster) *atomic.Pointer[roster.Roster] {
 	var p atomic.Pointer[roster.Roster]
 	p.Store(r)

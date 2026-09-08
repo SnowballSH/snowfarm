@@ -89,6 +89,7 @@ guard:
   max_claude_slots: 2
   dispatch_interval: 30s
   restart_window: "04:00-05:00"
+  drained_restarts: false
 ```
 
 The rules that matter most are the ones that keep an agent able to reach
@@ -185,7 +186,10 @@ A manager is safe to restart only between turns, and a turn is open from its
 start line until its completion line. Those open turns are kept in the ledger
 beside the log offset they were read from: a guard that restarts takes up the
 set the one before it left rather than finding every manager quiet and
-aborting a turn that is still running.
+aborting a turn that is still running. Reading those two lines is what
+`guard.turn_log_pattern` and `guard.turn_complete_pattern` do, and neither has
+a default, so the nightly restart is armed by `guard.drained_restarts: true`
+and a roster that arms it without both patterns does not load.
 
 A dispatched run's exit status comes only from the journal line `Main process
 exited, code=exited, status=N` — the transient unit is `--collect`ed, so

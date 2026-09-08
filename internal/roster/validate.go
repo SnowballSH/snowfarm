@@ -98,8 +98,13 @@ func (r *Roster) validateGuard() []error {
 			errs = append(errs, fmt.Errorf("guard.%s: %w", field, err))
 		}
 	}
-	if r.Guard.RestartWindow != "" && r.Guard.TurnCompletePattern == "" {
-		errs = append(errs, errors.New("guard.turn_complete_pattern is required while guard.restart_window arms the drained restarter: a turn-start line alone never proves the turn ended"))
+	if r.Guard.DrainedRestartsArmed() {
+		if r.Guard.TurnLogPattern == "" {
+			errs = append(errs, errors.New("guard.turn_log_pattern is required while guard.drained_restarts is on: with no turn to see, every manager reads as quiet"))
+		}
+		if r.Guard.TurnCompletePattern == "" {
+			errs = append(errs, errors.New("guard.turn_complete_pattern is required while guard.drained_restarts is on: a turn-start line alone never proves the turn ended"))
+		}
 	}
 	return errs
 }

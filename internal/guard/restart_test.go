@@ -11,7 +11,7 @@ import (
 func newRestarter(t *testing.T, at time.Time) (*Restarter, *breakerEnv) {
 	t.Helper()
 	env := &breakerEnv{
-		roster: held(testRoster(t, t.TempDir())),
+		roster: held(armedRoster(t, t.TempDir())),
 		ledger: openLedger(t),
 		units:  newFakeUnits(),
 		posts:  &recorder{},
@@ -189,12 +189,29 @@ func TestDrainedRestartLeavesPausedManagers(t *testing.T) {
 	}
 }
 
-// The completion pattern is what makes "quiet" mean anything. Until F2 pins
-// it from a real gateway.log the restarter refuses to arm rather than
-// restarting managers on a signal it does not have.
+// The shipped roster does not arm the nightly restart, and until F2 pins the
+// turn patterns from a real gateway.log it must not: nothing would match, every
+// manager would read as quiet, and both gateways would be restarted mid-turn
+// at 04:00 every night. This is the state a host loads, not one a test builds.
+func TestDrainedRestartIsDisarmedInTheShippedRoster(t *testing.T) {
+	restarter, env := newRestarter(t, inWindow(4, 0))
+	env.roster.Store(testRoster(t, t.TempDir()))
+
+	for range 3 {
+		if err := restarter.Tick(context.Background()); err != nil {
+			t.Fatalf("tick: %v", err)
+		}
+	}
+	if got := env.units.made(); len(got) != 0 {
+		t.Fatalf("a disarmed restarter restarted something: %v", got)
+	}
+}
+
+// Arming without a completion pattern is a load error, so the restarter meets
+// that roster only from a caller that built one by hand; it still refuses.
 func TestDrainedRestartRefusesWithoutACompletionPattern(t *testing.T) {
 	restarter, env := newRestarter(t, inWindow(4, 0))
-	r := testRoster(t, t.TempDir())
+	r := armedRoster(t, t.TempDir())
 	r.Guard.TurnCompletePattern = ""
 	env.roster.Store(r)
 

@@ -102,6 +102,9 @@ guard:
   default_max_runtime: 2h
   hygiene_interval: 5m
   restart_window: "04:00-05:00"
+  drained_restarts: false
+  turn_log_pattern: '^\S+ .* discord .* handling message from user (\d+) in channel (\d+)'
+  turn_complete_pattern: '^\S+ .* discord .* finished handling message from user (\d+) in channel (\d+)'
 ```
 
 ## `farm`
@@ -207,10 +210,13 @@ subscribes it to a channel so the outcome is reported there.
 | `default_max_runtime` | `2h` | positive; what bounds a running card created without a `max_runtime` |
 | `hygiene_interval` | `5m` | positive; the sweep that hashes profiles, sizes the board and removes forged notifier subscriptions |
 | `housekeeping_passes` | `true` | an explicit `false` suspends the maintenance pass, and never the guard's own backstop |
-| `restart_window` | `04:00-05:00` | the nightly drained-restart window. Setting it requires `turn_complete_pattern`: a turn-start line alone never proves the turn ended |
-| `turn_log_pattern` | a placeholder | must compile; matches the gateway log line that opens a manager's turn |
-| `turn_complete_pattern` | a placeholder | must compile; matches the line that closes one |
+| `drained_restarts` | `false` | arms the nightly drained restart. While it is off the restarter runs no pass at all and says once in the log why |
+| `restart_window` | `04:00-05:00` | the window the nightly restart uses once it is armed |
+| `turn_log_pattern` | none | must compile; matches the gateway log line that opens a manager's turn. **Required while `drained_restarts` is on** |
+| `turn_complete_pattern` | none | must compile; matches the line that closes one. **Required while `drained_restarts` is on**: a turn-start line alone never proves the turn ended |
 
-Both turn patterns ship as placeholders until a real `gateway.log` sample pins
-them. The breaker counts turns with them, and the drained restarter is armed
-only once they are right.
+Neither turn pattern has a default. The breaker counts a manager's turns with
+them, and the drained restarter reads whether a turn is open, so a farm whose
+patterns match nothing sees every manager as quiet — which is why arming the
+restart requires both, and why the shipped roster leaves it off until a real
+`gateway.log` sample pins them.
