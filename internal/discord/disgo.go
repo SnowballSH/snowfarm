@@ -2,9 +2,11 @@ package discord
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/disgoorg/disgo"
@@ -27,8 +29,9 @@ var _ Client = (*Disgo)(nil)
 
 // Disgo is the Client backed by github.com/disgoorg/disgo against one guild.
 type Disgo struct {
-	client  *bot.Client
-	guildID snowflake.ID
+	client     *bot.Client
+	guildID    snowflake.ID
+	subscribed atomic.Bool
 }
 
 func NewDisgo(token, guildID string) (*Disgo, error) {
@@ -221,7 +224,15 @@ func (d *Disgo) GatewayBot(ctx context.Context, botToken string) (SessionStartLi
 	}, nil
 }
 
+// Events subscribes once. disgo appends listeners and dispatches to every
+// one it ever took, and it reconnects the gateway underneath rather than
+// ending the stream, so a second subscription would deliver each event twice
+// and leave the first pipeline stalled; a caller that needs a fresh stream
+// builds a fresh Disgo.
 func (d *Disgo) Events(ctx context.Context) (<-chan Event, error) {
+	if !d.subscribed.CompareAndSwap(false, true) {
+		return nil, errors.New("gateway already subscribed")
+	}
 	raw := make(chan Event, eventBuffer)
 	deliver := func(e Event) {
 		select {
@@ -244,6 +255,12 @@ func (d *Disgo) Events(ctx context.Context) (<-chan Event, error) {
 		}),
 		bot.NewListenerFunc(func(e *events.ThreadCreate) {
 			deliver(threadEvent(e.Thread))
+		}),
+		bot.NewListenerFunc(func(*events.Ready) {
+			deliver(Event{Kind: EventGatewayReady, At: time.Now().UTC()})
+		}),
+		bot.NewListenerFunc(func(*events.Resumed) {
+			deliver(Event{Kind: EventGatewayResume, At: time.Now().UTC()})
 		}),
 	)
 	if err := d.client.OpenGateway(ctx); err != nil {

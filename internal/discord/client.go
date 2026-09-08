@@ -121,7 +121,18 @@ const (
 	EventMessageDelete EventKind = "message_delete"
 	EventAuditLogEntry EventKind = "audit_log_entry"
 	EventThreadCreate  EventKind = "thread_create"
+
+	// EventGatewayReady and EventGatewayResume are the client reporting
+	// that its gateway session restarted. A client reconnects on its own
+	// and never ends the event stream for it, so these two kinds are the
+	// only signal that what happened in between may be missing.
+	EventGatewayReady  EventKind = "gateway_ready"
+	EventGatewayResume EventKind = "gateway_resume"
 )
+
+func restartsSession(kind EventKind) bool {
+	return kind == EventGatewayReady || kind == EventGatewayResume
+}
 
 // Event is one gateway fact, flat so the logger can persist it as a line.
 type Event struct {
@@ -163,5 +174,10 @@ type Client interface {
 	// budget. An empty token uses the client's own.
 	GatewayBot(ctx context.Context, botToken string) (SessionStartLimit, error)
 
+	// Events subscribes once and delivers every fact until ctx ends,
+	// which is also the only thing that closes the channel: the client
+	// reconnects underneath and reports each restart as an
+	// EventGatewayReady or EventGatewayResume rather than by ending the
+	// stream. A second call on a live client is an error.
 	Events(ctx context.Context) (<-chan Event, error)
 }

@@ -178,9 +178,12 @@ func (f *fakeClient) GatewayBot(context.Context, string) (SessionStartLimit, err
 	return SessionStartLimit{Total: 1000, Remaining: 1000, MaxConcurrency: 1}, nil
 }
 
-func (f *fakeClient) Events(context.Context) (<-chan Event, error) {
+func (f *fakeClient) Events(ctx context.Context) (<-chan Event, error) {
 	ch := make(chan Event)
-	close(ch)
+	go func() {
+		<-ctx.Done()
+		close(ch)
+	}()
 	return ch, nil
 }
 
