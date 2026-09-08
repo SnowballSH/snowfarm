@@ -88,7 +88,8 @@ func TestDefaultsAreConservative(t *testing.T) {
 		t.Fatalf("turn patterns: %q %q", r.Guard.TurnLogPattern, r.Guard.TurnCompletePattern)
 	}
 	if r.Farm.HomeRoot != "/var/lib/farm" || r.Farm.KanbanHome != "/srv/snowfarm/kanban" ||
-		r.Farm.ClaudeDir != "/srv/snowfarm/claude" || r.Farm.HermesBin != "/usr/local/bin/hermes" {
+		r.Farm.ClaudeDir != "/srv/snowfarm/claude" || r.Farm.HermesBin != "/usr/local/bin/hermes" ||
+		r.Farm.SoulDir != "/etc/snowfarm/soul" {
 		t.Fatalf("farm defaults: %+v", r.Farm)
 	}
 	if r.Farm.UIDBase != 6000 {
@@ -125,6 +126,7 @@ func TestValidateRejects(t *testing.T) {
 		"zero-context.yaml":               "context_length",
 		"disabled-skills.yaml":            "disabled_toolsets",
 		"uid-base-below-floor.yaml":       "uid_base",
+		"relative-soul-dir.yaml":          "farm.soul_dir",
 	}
 	for file, want := range cases {
 		t.Run(file, func(t *testing.T) {

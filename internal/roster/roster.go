@@ -36,6 +36,7 @@ type Farm struct {
 
 	ClaudeDir string          `yaml:"claude_dir"`
 	HermesBin string          `yaml:"hermes_bin"`
+	SoulDir   string          `yaml:"soul_dir"`
 	Modelgate ModelgateConfig `yaml:"modelgate"`
 	Discord   DiscordConfig   `yaml:"discord"`
 	Location  string          `yaml:"location"`
@@ -141,6 +142,7 @@ const (
 	defaultKanbanHome = "/srv/snowfarm/kanban"
 	defaultClaudeDir  = "/srv/snowfarm/claude"
 	defaultHermesBin  = "/usr/local/bin/hermes"
+	defaultSoulDir    = "/etc/snowfarm/soul"
 
 	defaultRestartWindow = "04:00-05:00"
 
@@ -181,6 +183,7 @@ func (r *Roster) applyDefaults() {
 	defaultString(&r.Farm.KanbanHome, defaultKanbanHome)
 	defaultString(&r.Farm.ClaudeDir, defaultClaudeDir)
 	defaultString(&r.Farm.HermesBin, defaultHermesBin)
+	defaultString(&r.Farm.SoulDir, defaultSoulDir)
 	defaultInt(&r.Farm.UIDBase, uidFloor)
 
 	r.Farm.WorkspacesRoot = path.Join(r.Farm.KanbanHome, "kanban", "workspaces")

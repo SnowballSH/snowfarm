@@ -24,6 +24,16 @@ cards and the guard's thresholds. `internal/roster` loads it, applies the
 conservative defaults, and validates it — including the rules that keep an
 agent able to reach Claude Code and a worker able to terminate its own card.
 
+Each agent's `SOUL.md` is two parts: the tier template every manager or worker
+shares, and `<soul_dir>/<agent>.md`, the agent-specific paragraphs the
+deployment repository ships as `soul/`. The operator copies that directory to
+`soul_dir` (default `/etc/snowfarm/soul`, the directory `0755 root:root` and
+the files `0644`) before `snowfarm apply`. The render is the tier template,
+one blank line, then the persona file verbatim; an agent the directory has no
+file for gets the tier template alone, a persona the renderer cannot read
+fails the render rather than dropping it, and editing one shows as an update
+to that agent's `SOUL.md` on the next `snowfarm plan`.
+
 `enabled` is the phase gate: the guard dispatches for, schedules for and
 manages only the agents marked `enabled`, so an agent declared for a later
 phase is never dispatched-as before its account exists. A running guard picks

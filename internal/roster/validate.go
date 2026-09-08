@@ -3,6 +3,7 @@ package roster
 import (
 	"errors"
 	"fmt"
+	"path"
 	"regexp"
 	"slices"
 	"strings"
@@ -45,6 +46,9 @@ func (r *Roster) validateFarm() []error {
 		errs = append(errs, errors.New("farm.location is required"))
 	} else if _, err := time.LoadLocation(r.Farm.Location); err != nil {
 		errs = append(errs, fmt.Errorf("farm.location %q: %w", r.Farm.Location, err))
+	}
+	if !path.IsAbs(r.Farm.SoulDir) {
+		errs = append(errs, fmt.Errorf("farm.soul_dir %q must be an absolute path: apply reads each agent's persona from it", r.Farm.SoulDir))
 	}
 	if r.Farm.UIDBase < uidFloor {
 		errs = append(errs, fmt.Errorf("farm.uid_base is %d, below the floor %d the IMDS egress drop keys on", r.Farm.UIDBase, uidFloor))

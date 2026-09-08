@@ -142,6 +142,7 @@ func loadRoster(t *testing.T) *roster.Roster {
 	if err != nil {
 		t.Fatal(err)
 	}
+	r.Farm.SoulDir = t.TempDir()
 	return r
 }
 
@@ -166,6 +167,7 @@ func rosterWith(t *testing.T, swaps ...[2]string) *roster.Roster {
 	if err != nil {
 		t.Fatal(err)
 	}
+	r.Farm.SoulDir = t.TempDir()
 	return r
 }
 
@@ -500,6 +502,62 @@ func TestPlanReportsDrift(t *testing.T) {
 	}
 }
 
+func TestPersonaEditPlansAsAnUpdate(t *testing.T) {
+	root := t.TempDir()
+	c := recordCalls(t)
+	a := &Applier{Root: root, Run: c.Run, Lookup: c.Lookup}
+	r := loadRoster(t)
+	hestia, ok := r.Agent("hestia")
+	if !ok {
+		t.Fatal("hestia is missing from the fixture")
+	}
+	persona := filepath.Join(r.Farm.SoulDir, hestia.Name+".md")
+	const first = "## Your standing rules\n\nNever delete an event.\n"
+	const second = "## Your standing rules\n\nNever delete an event, and never move one silently.\n"
+	write(t, persona, first, 0o644)
+
+	p, err := a.Plan(r, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Apply(r, p); err != nil {
+		t.Fatal(err)
+	}
+	soul := filepath.Join(root, hestia.HermesHome(r.Farm), "SOUL.md")
+	if got := read(t, soul); !strings.Contains(got, first) {
+		t.Fatalf("the persona never reached the agent:\n%s", got)
+	}
+	p, err = a.Plan(r, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Empty() {
+		t.Fatalf("plan not empty after the persona was installed:\n%s", p)
+	}
+
+	write(t, persona, second, 0o644)
+	p, err = a.Plan(r, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := hestia.HermesHome(r.Farm) + "/SOUL.md"
+	if !slices.Contains(targets(p), target) {
+		t.Fatalf("an edited persona must plan as an update to %s:\n%s", target, p)
+	}
+	if detail := detailOf(t, p, target); !strings.Contains(detail, "content") {
+		t.Fatalf("%s: detail %q does not mention the content", target, detail)
+	}
+	if !slices.Contains(targets(p), profileHashPath) {
+		t.Fatalf("the hygiene baseline must move with the persona:\n%s", p)
+	}
+	if err := a.Apply(r, p); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, soul); !strings.Contains(got, second) {
+		t.Fatalf("the edited persona never reached the agent:\n%s", got)
+	}
+}
+
 func TestPlanReportsAProfileAncestorTheAgentDoesNotOwn(t *testing.T) {
 	a, r, c, _ := applied(t)
 	a.Lookup = func(user string) (int, bool) {
@@ -759,6 +817,15 @@ func mustRun(t *testing.T, c *calls, name string, args ...string) {
 	if _, err := c.Run(name, args...); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func read(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }
 
 func write(t *testing.T, path, content string, mode fs.FileMode) {

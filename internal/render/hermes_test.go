@@ -16,7 +16,11 @@ import (
 
 var update = flag.Bool("update", false, "rewrite golden files")
 
-const fixture = "../roster/testdata/farm.yaml"
+const (
+	fixture        = "../roster/testdata/farm.yaml"
+	soulFixtureDir = "testdata/soul"
+	personaAgent   = "hestia"
+)
 
 func loadRoster(t *testing.T) *roster.Roster {
 	t.Helper()
@@ -24,6 +28,11 @@ func loadRoster(t *testing.T) *roster.Roster {
 	if err != nil {
 		t.Fatalf("load %s: %v", fixture, err)
 	}
+	dir, err := filepath.Abs(soulFixtureDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Farm.SoulDir = dir
 	return r
 }
 
