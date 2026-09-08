@@ -306,21 +306,35 @@ func TestGoogleTokenProbe(t *testing.T) {
 }
 
 // Before F3 places the token there is nothing to check, and a farm without
-// Google must not report a broken one.
+// Google must not report a broken one. Zero is the value A5 alerts on, so
+// "not checked" may not be reported as zero — from a fresh registry, whose
+// gauge would otherwise sit at zero forever, or from a weekly pass that found
+// no file to read.
 func TestGoogleTokenProbeIsQuietWithoutAToken(t *testing.T) {
 	probes, env := newProbes(t)
 	dir := t.TempDir()
 	probes.GoogleClientPath = filepath.Join(dir, "client.json")
 	probes.GoogleTokenPath = filepath.Join(dir, "tokens.json")
 
+	if got := testutil.ToFloat64(metrics.New().GoogleTokenHealthy); got == googleRefused {
+		t.Fatalf("a registry reports google_token_healthy %v before any probe has run", got)
+	}
 	if err := probes.Weekly(context.Background()); err != nil {
 		t.Fatalf("weekly: %v", err)
 	}
 	if posts := env.posts.all(); len(posts) != 0 {
 		t.Fatalf("a farm with no Google token posted %v", posts)
 	}
-	if got := testutil.ToFloat64(env.reg.GoogleTokenHealthy); got != 0 {
-		t.Fatalf("google_token_healthy is %v before anything was checked", got)
+	if got := testutil.ToFloat64(env.reg.GoogleTokenHealthy); got == googleRefused {
+		t.Fatalf("google_token_healthy is %v with no token to check, which is the value a refusal reports", got)
+	}
+
+	write(t, probes.GoogleTokenPath, `{"accounts":{"primary":{"access_token":"expired"}}}`)
+	if err := probes.Weekly(context.Background()); err != nil {
+		t.Fatalf("weekly over a token file with no refresh token: %v", err)
+	}
+	if got := testutil.ToFloat64(env.reg.GoogleTokenHealthy); got == googleRefused {
+		t.Fatalf("a token file with no refresh token reported %v, the value a refusal reports", got)
 	}
 }
 

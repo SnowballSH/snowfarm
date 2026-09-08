@@ -104,7 +104,7 @@ func New() *Registry {
 		GoogleTokenHealthy: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: namespace,
 			Name:      "google_token_healthy",
-			Help:      "1 when the Google refresh token passed its last weekly check.",
+			Help:      "0 when Google refused the stored refresh token; 1 while it is honoured, and while there is no token to check.",
 		}),
 		ClaudeRunsTotal: counter("claude_runs_total",
 			"Claude Code runs the wrapper recorded, by the agent that ran one and the model it asked for.", "agent", "model"),
@@ -141,6 +141,10 @@ func New() *Registry {
 		r.ClaudeLimitHitsTotal,
 		r.ClaudeRunSecondsTotal,
 	)
+	// A gauge is born at zero, and zero is this family's alerting value: a
+	// farm whose weekly probe has not run yet, or has nothing to check, must
+	// not report a refused Google grant from the moment it starts.
+	r.GoogleTokenHealthy.Set(1)
 	return r
 }
 

@@ -44,6 +44,18 @@ const (
 	boardFileWAL = "wal"
 
 	noticePinDrift = "pin_drift"
+
+	// googleRefused is the one thing snowfarm_google_token_healthy says
+	// about a token: Google would not honour it. It is the value A5 alerts
+	// on, so nothing else may report it.
+	googleRefused = 0
+
+	// googleTokenUnchecked is what snowfarm_google_token_healthy reports
+	// when there is nothing to check: no token file, no refresh token in
+	// one, or no paths to look at. Zero is reserved for a grant Google
+	// refused, so an alert on zero fires on a real refusal rather than
+	// continuously on a farm whose consent ceremony has not happened yet.
+	googleTokenUnchecked = 1
 )
 
 // Probes are the guard's outward checks: the model gateway every minute, the
@@ -233,10 +245,12 @@ func (p *Probes) Weekly(ctx context.Context) error {
 func (p *Probes) googleToken(ctx context.Context) error {
 	client, token := p.googlePaths()
 	if token == "" || client == "" {
+		p.Metrics.GoogleTokenHealthy.Set(googleTokenUnchecked)
 		return nil
 	}
 	refresh, err := readRefreshToken(token)
 	if errors.Is(err, fs.ErrNotExist) || (err == nil && refresh == "") {
+		p.Metrics.GoogleTokenHealthy.Set(googleTokenUnchecked)
 		return nil
 	}
 	if err != nil {
