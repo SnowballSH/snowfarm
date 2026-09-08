@@ -115,18 +115,24 @@ func (t *Turns) open(agent string) (time.Time, bool, error) {
 }
 
 // reset forgets a manager's open turns, which is what a restart does to them.
+// The durable set is cleared first: a memory that says "no open turn" over a
+// ledger that still holds rows survives only until the next guard start, which
+// loads those rows and reads the manager as busy for good.
 func (t *Turns) reset(agent string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	delete(t.inflight, agent)
 	if t.loaded == nil {
 		t.loaded = map[string]bool{}
 	}
-	t.loaded[agent] = true
-	if t.Store == nil {
-		return nil
+	if t.Store != nil {
+		if err := t.Store.ClearTurns(agent); err != nil {
+			t.loaded[agent] = false
+			return err
+		}
 	}
-	return t.Store.ClearTurns(agent)
+	delete(t.inflight, agent)
+	t.loaded[agent] = true
+	return nil
 }
 
 // loadLocked reads the manager's open turns from the store once, so a guard

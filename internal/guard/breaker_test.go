@@ -2,6 +2,7 @@ package guard
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -325,6 +326,37 @@ func TestTurnsPairCompletionsWithStarts(t *testing.T) {
 	}
 	if _, open, err := breaker.Turns.open("atlas"); err != nil || open {
 		t.Fatalf("a turn whose completion was logged is still open: %v %v", open, err)
+	}
+}
+
+// failingClearTurns is a store whose durable clear fails, which is the only
+// way the reset order below can be observed.
+type failingClearTurns struct {
+	TurnStore
+	err error
+}
+
+func (s failingClearTurns) ClearTurns(string) error { return s.err }
+
+// The open turns a restart forgets are durable, so forgetting them in memory
+// before the ledger agrees would leave a guard that says "quiet" over rows the
+// next guard start reads back as a turn that never ends.
+func TestTurnResetKeepsTheTurnWhenTheLedgerRefuses(t *testing.T) {
+	ledger := openLedger(t)
+	store := failingClearTurns{TurnStore: ledger, err: errors.New("ledger is read-only")}
+	turns := &Turns{Store: store}
+	at := time.Date(2026, 9, 7, 4, 0, 0, 0, time.UTC)
+	if err := turns.started("atlas", at); err != nil {
+		t.Fatalf("start a turn: %v", err)
+	}
+	if err := turns.reset("atlas"); err == nil {
+		t.Fatal("reset reported success while the ledger refused the clear")
+	}
+	if _, open, err := turns.open("atlas"); err != nil || !open {
+		t.Fatalf("the turn was forgotten though the ledger still holds it: open=%v err=%v", open, err)
+	}
+	if _, open, err := (&Turns{Store: ledger}).open("atlas"); err != nil || !open {
+		t.Fatalf("a fresh guard reads no open turn from the ledger: open=%v err=%v", open, err)
 	}
 }
 
