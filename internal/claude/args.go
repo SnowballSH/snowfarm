@@ -12,12 +12,12 @@ import (
 )
 
 const (
-	DefaultModel    = "claude-fable-5-1"
+	DefaultModel    = "claude-opus-5"
 	DefaultMaxTurns = 120
 )
 
 var (
-	models  = []string{DefaultModel, "claude-opus-5"}
+	models  = []string{DefaultModel, "claude-fable-5-1"}
 	efforts = []string{"low", "medium", "high", "xhigh", "max"}
 
 	// Every one of these decides how contained the run is, and the wrapper

@@ -363,22 +363,22 @@ func TestTailCountsUnderTheLogItReadFrom(t *testing.T) {
 func TestTailLeavesAPartialLine(t *testing.T) {
 	tail, env := newClaudeTail(t)
 	env.appendRuns(t, "hestia", okRun("hestia", claude.DefaultModel, time.Second))
-	env.appendRaw(t, "hestia", `{"agent":"hestia","model":"claude-opus-5"`)
+	env.appendRaw(t, "hestia", `{"agent":"hestia","model":"claude-fable-5-1"`)
 
 	env.tick(t, tail)
 
 	if got := runs(t, env, "hestia", claude.DefaultModel); got != 1 {
 		t.Fatalf("claude_runs_total{hestia,%s} = %v, want 1", claude.DefaultModel, got)
 	}
-	if got := runs(t, env, "hestia", "claude-opus-5"); got != 0 {
+	if got := runs(t, env, "hestia", "claude-fable-5-1"); got != 0 {
 		t.Fatalf("a half-written line was counted as a run")
 	}
 
 	env.appendRaw(t, "hestia", ",\"duration_ms\":1000}\n")
 	env.tick(t, tail)
 
-	if got := runs(t, env, "hestia", "claude-opus-5"); got != 1 {
-		t.Fatalf("claude_runs_total{hestia,claude-opus-5} = %v, want 1 once the line was finished", got)
+	if got := runs(t, env, "hestia", "claude-fable-5-1"); got != 1 {
+		t.Fatalf("claude_runs_total{hestia,claude-fable-5-1} = %v, want 1 once the line was finished", got)
 	}
 }
 

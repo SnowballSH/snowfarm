@@ -77,7 +77,7 @@ func TestArgsBuild(t *testing.T) {
 	want := []string{
 		"claude",
 		"-p", "print the git HEAD",
-		"--model", "claude-fable-5-1",
+		"--model", "claude-opus-5",
 		"--setting-sources", "user",
 		"--settings", wantSettings,
 		"--strict-mcp-config",
@@ -99,7 +99,7 @@ func TestArgsBuild(t *testing.T) {
 func TestArgsBuildCarriesCallerChoices(t *testing.T) {
 	opts, err := ParseArgs([]string{
 		"-p", "review the diff",
-		"--model", "claude-opus-5",
+		"--model", "claude-fable-5-1",
 		"--effort", "max",
 		"--max-turns", "40",
 		"--add-dir", "/a",
@@ -116,7 +116,7 @@ func TestArgsBuildCarriesCallerChoices(t *testing.T) {
 	want := []string{
 		"/usr/local/bin/claude",
 		"-p", "review the diff",
-		"--model", "claude-opus-5",
+		"--model", "claude-fable-5-1",
 		"--setting-sources", "user",
 		"--settings", wantSettings,
 		"--strict-mcp-config",

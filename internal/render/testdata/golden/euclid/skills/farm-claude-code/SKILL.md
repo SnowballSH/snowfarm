@@ -34,7 +34,7 @@ farm-claude -p "<self-contained task, with its acceptance criteria>" \
   what to change, in which files, and how you will judge that it worked.
   A prompt that says "continue" or "fix the tests" without naming them wastes
   a run.
-- `--model` defaults to `claude-fable-5-1`. Ask for `claude-opus-5` when the
+- `--model` defaults to `claude-opus-5`. Ask for `claude-fable-5-1` when the
   task is genuinely hard to reason about rather than merely long.
 - `--effort` defaults to the farm's setting; raise it for design work, lower
   it for mechanical edits.
