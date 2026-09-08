@@ -16,8 +16,8 @@ const (
 )
 
 var (
-	limitMessage = regexp.MustCompile(`(?im)^you['’]ve hit your (session|weekly|opus|sonnet) limit\s*·\s*resets (.+?)\s*$`)
-	fableMessage = regexp.MustCompile(`(?im)^fable limit reached\b`)
+	limitMessage = regexp.MustCompile(`(?i)\Ayou['’]ve hit your (session|weekly|opus|sonnet) limit\s*·\s*resets (.+)\z`)
+	fableMessage = regexp.MustCompile(`(?i)\Afable limit reached\b`)
 )
 
 // ResultLine is the stream's final result object.
@@ -96,7 +96,7 @@ func ParseStream(r io.Reader) (Stream, error) {
 // structured event first, then the 429, then the message.
 func (s Stream) Limit(now time.Time) (Limit, bool) {
 	result, _ := s.Result()
-	kind, resetText := s.limitKind()
+	kind, resetText := s.limitKind(result, s.failed(result))
 	hit := (s.rateLimit != nil && s.rateLimit.Status == statusRejected) ||
 		(result.IsError && result.APIErrorStatus == 429) ||
 		kind != ""
@@ -109,12 +109,26 @@ func (s Stream) Limit(now time.Time) (Limit, bool) {
 	return Limit{Kind: kind, ResetAt: s.resetAt(resetText, now)}, true
 }
 
-func (s Stream) limitKind() (kind, resetText string) {
-	result, _ := s.Result()
-	if match := limitMessage.FindStringSubmatch(result.Result); match != nil {
-		return strings.ToLower(match[1]), match[2]
+func (s Stream) failed(result ResultLine) bool {
+	return result.IsError || result.APIErrorStatus == 429 || s.rateLimit != nil
+}
+
+// limitKind reads the kind out of the result object. The result text is
+// model-authored, and an agent that quotes a limit message back would
+// otherwise halt the whole farm, so a message counts only as the result's
+// closing line and only alongside a failure signal — except the Fable notice,
+// which Claude Code emits on a successful run and which is therefore taken on
+// its own only when it is the entire result.
+func (s Stream) limitKind(result ResultLine, failed bool) (kind, resetText string) {
+	text := strings.TrimSpace(result.Result)
+	last := text
+	if cut := strings.LastIndexByte(text, '\n'); cut >= 0 {
+		last = strings.TrimSpace(text[cut+1:])
 	}
-	if fableMessage.MatchString(result.Result) {
+	if match := limitMessage.FindStringSubmatch(last); match != nil && failed {
+		return strings.ToLower(match[1]), strings.TrimSpace(match[2])
+	}
+	if fableMessage.MatchString(last) && (failed || last == text) {
 		return KindFable, ""
 	}
 	if result.ErrorCode == creditsErrCode {

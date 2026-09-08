@@ -65,6 +65,27 @@ func TestParseStreamLimits(t *testing.T) {
 			text: "upstream said no", isError: true, apiError: 429,
 		},
 		{
+			name:   "a limit message quoted inside an answer is not a limit",
+			stream: `{"type":"result","subtype":"success","is_error":false,"num_turns":4,"duration_ms":1500,"result":"The earlier run stopped on this:\n\nYou've hit your weekly limit · resets Mon 12:00am\n\nI waited and finished the report."}`,
+			text:   "The earlier run stopped on this:\n\nYou've hit your weekly limit · resets Mon 12:00am\n\nI waited and finished the report.",
+		},
+		{
+			name:   "a limit message closing a successful answer is not a limit",
+			stream: `{"type":"result","subtype":"success","is_error":false,"num_turns":4,"result":"The wrapper answered:\nYou've hit your weekly limit · resets Mon 12:00am"}`,
+			text:   "The wrapper answered:\nYou've hit your weekly limit · resets Mon 12:00am",
+		},
+		{
+			name:   "a Fable notice quoted inside an answer is not a limit",
+			stream: `{"type":"result","subtype":"success","is_error":false,"num_turns":2,"result":"Yesterday the farm logged:\nFable limit reached · continuing on Fable 5.1 uses usage credits\nNothing else went wrong."}`,
+			text:   "Yesterday the farm logged:\nFable limit reached · continuing on Fable 5.1 uses usage credits\nNothing else went wrong.",
+		},
+		{
+			name:    "a limit message closing a failed run is a limit",
+			stream:  `{"type":"result","subtype":"success","is_error":true,"api_error_status":429,"result":"partial answer\nYou've hit your weekly limit · resets Mon 12:00am"}`,
+			isLimit: true, kind: "weekly", resetAt: time.Date(2026, 9, 14, 0, 0, 0, 0, time.UTC),
+			text: "partial answer\nYou've hit your weekly limit · resets Mon 12:00am", isError: true, apiError: 429,
+		},
+		{
 			name: "a healthy run",
 			stream: `{"type":"system","subtype":"init"}
 {"type":"assistant","message":{"content":"working"}}
@@ -207,5 +228,24 @@ func TestResultError(t *testing.T) {
 	record := h.record(t)
 	if record["is_error"] != true || record["limit_kind"] != "" {
 		t.Errorf("record %v, want is_error true and no limit_kind", record)
+	}
+}
+
+func TestResultQuotedLimitRunsToCompletion(t *testing.T) {
+	h := newHarness(t)
+	h.setEnv("FAKE_CLAUDE_MODE", "quote")
+
+	if code := h.run("-p", "report on yesterday's runs"); code != ExitOK {
+		t.Fatalf("exit %d on an answer quoting a limit message, want %d (stderr: %s)", code, ExitOK, h.stderr.String())
+	}
+	if strings.Contains(h.stdout.String(), "Claude Code limit:") {
+		t.Errorf("stdout %q, want no limit report", h.stdout.String())
+	}
+	record := h.record(t)
+	if record["limit_kind"] != "" || record["reset_at"] != "" {
+		t.Errorf("record %v, want no limit_kind and no reset_at", record)
+	}
+	if record["is_error"] != false {
+		t.Errorf("record %v, want is_error false", record)
 	}
 }
