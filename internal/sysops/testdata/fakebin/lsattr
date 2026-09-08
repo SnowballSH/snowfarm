@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+state="${SNOWFARM_FAKEBIN_STATE:?SNOWFARM_FAKEBIN_STATE is unset}"
+list="${state}/immutable"
+while [ $# -gt 0 ]; do
+  case "$1" in -*) shift ;; *) break ;; esac
+done
+for path in "$@"; do
+  [ -e "${path}" ] || { echo "lsattr: No such file or directory while trying to stat ${path}" >&2; exit 1; }
+  if [ -f "${list}" ] && grep -qxF "${path}" "${list}"; then
+    printf -- '----i---------e------- %s\n' "${path}"
+  else
+    printf -- '-------------e------- %s\n' "${path}"
+  fi
+done

@@ -1,0 +1,44 @@
+[Unit]
+Description=Hermes gateway for {{ .Agent.Name }} (snowfarm)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={{ .Home }}
+Environment=HOME={{ .Home }}
+Environment=HERMES_HOME={{ .HermesHome }}
+Environment=HERMES_KANBAN_HOME={{ .KanbanHome }}
+Environment=HERMES_KANBAN_WORKSPACES_ROOT={{ .WorkspacesRoot }}
+Environment=HERMES_KANBAN_ATTACHMENTS_ROOT={{ .AttachmentsRoot }}
+Environment=HERMES_KANBAN_DISPATCH_IN_GATEWAY=false
+Environment=HERMES_WRITE_SAFE_ROOT={{ .Home }}
+Environment=HERMES_MAX_ITERATIONS={{ .Agent.MaxIterations }}
+Environment=HERMES_AGENT_TIMEOUT=1800
+Environment=HERMES_REDACT_SECRETS=true
+Environment=DISCORD_ALLOWED_USERS={{ .OperatorUserID }}
+Environment=DISCORD_ALLOWED_CHANNELS={{ .AllowedChannels }}
+Environment=DISCORD_REQUIRE_MENTION=true
+Environment=DISCORD_THREAD_REQUIRE_MENTION=true
+Environment=DISCORD_ALLOW_BOTS=none
+Environment=DISCORD_REPLY_TO_MODE=off
+Environment=DISCORD_HISTORY_BACKFILL=false
+Environment=DISCORD_ALLOW_MENTION_EVERYONE=false
+Environment=DISCORD_ALLOW_MENTION_ROLES=false
+Environment=DISCORD_AUTO_THREAD=true
+Environment=DISCORD_COMMAND_SYNC_POLICY=off
+Environment=DISCORD_HOME_CHANNEL={{ .HomeChannel }}
+ExecStart={{ .HermesBin }} gateway run
+NoNewPrivileges=true
+Restart=on-failure
+RestartSec=15
+RestartSteps=5
+RestartMaxDelaySec=120
+UMask=0007
+TasksMax=1024
+LimitNOFILE=8192
+KillMode=mixed
+TimeoutStopSec=60
+
+[Install]
+WantedBy=default.target

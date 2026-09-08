@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+state="${SNOWFARM_FAKEBIN_STATE:?SNOWFARM_FAKEBIN_STATE is unset}"
+jobs="${state}/cron-$(basename "${HERMES_HOME:-unknown}")"
+[ "${1:-}" = "cron" ] || exit 2
+case "${2:-}" in
+  create)
+    shift 2
+    name=""
+    while [ $# -gt 0 ]; do
+      if [ "$1" = "--name" ]; then name="${2:-}"; fi
+      shift
+    done
+    printf '%s\n' "${name}" >> "${jobs}"
+    ;;
+  list)
+    if [ -f "${jobs}" ]; then cat "${jobs}"; fi
+    ;;
+  *) exit 2 ;;
+esac
