@@ -128,6 +128,19 @@ repository's `soul/` directory to `farm.soul_dir` **before** `snowfarm apply`.
 | `/var/lib/snowfarm/log/events-<hour>-<seq>.jsonl.age` | 0600 (directory 0700) | `snowfarm:farm-agents` | the Discord event log, one complete age file per flush |
 | `/srv/snowfarm/claude/shared/limit-until` | 0640 | `snowfarm:farm-agents` | the guard, from what the run ledgers report; removed when the window ends |
 | `/srv/snowfarm/kanban/**` | — | `farm-<agent>:farm-agents` | Hermes, as each agent; the setgid board directory is what puts every file in the shared group |
+| `/srv/snowfarm/kanban/kanban.db` | — | `farm-<agent>:farm-agents` | Hermes, on the first command that touches the board. Neither `snowfarm apply` nor the guard ever creates or writes it |
+
+### The guard does not wait for the board
+
+The bootstrap would deadlock if it did. A manager's gateway unit is installed
+carrying `pending-reconcile` and is **not** started until an apply has read
+the channel ids, and only a guard that has reconciled the guild writes them —
+while `kanban.db` is Hermes' file, which no Hermes process has created on a
+fresh host. So `snowfarm guard` starts without a board: it warns once with the
+path it looked at, reconciles the guild, and every pass that reads the board —
+the dispatch tick, the hygiene sweep, the board-size health probe, and the
+`status` and `runs` controls — fails and says so until the file appears. No
+restart is needed once it does.
 
 The guard's own files take the group its unit gives it, `farm-agents`; what
 keeps them unreadable is `/var/lib/snowfarm` itself, 0750 `snowfarm:snowfarm`.

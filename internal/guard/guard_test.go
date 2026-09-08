@@ -45,6 +45,12 @@ type fixture struct {
 
 func newGuardFixture(t *testing.T, argusEnabled bool) *fixture {
 	t.Helper()
+	return newFixture(t, argusEnabled, true)
+}
+
+// newFixture builds the guard, with or without the board file Hermes owns.
+func newFixture(t *testing.T, argusEnabled, withBoard bool) *fixture {
+	t.Helper()
 	dir := t.TempDir()
 	state := filepath.Join(dir, "state")
 	board := filepath.Join(dir, "kanban")
@@ -56,7 +62,9 @@ func newGuardFixture(t *testing.T, argusEnabled bool) *fixture {
 			t.Fatalf("make %s: %v", path, err)
 		}
 	}
-	writeBoardAt(t, filepath.Join(board, boardFile))
+	if withBoard {
+		writeBoardAt(t, filepath.Join(board, boardFile))
+	}
 	write(t, filepath.Join(state, profileHashFile), "{}")
 
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -369,6 +377,28 @@ func scrape(t *testing.T, addr string) string {
 		t.Fatalf("read body: %v", err)
 	}
 	return string(body)
+}
+
+// The bootstrap is circular unless the guard starts without a board: a
+// manager's gateway unit is installed but not started until `snowfarm apply`
+// reads the channel ids, and only a guard that has reconciled the guild
+// writes them — while the board itself is Hermes' file, which no Hermes
+// process has created yet. So the guard starts, reconciles, and reports the
+// board as unreadable until it appears.
+func TestGuardStartsBeforeTheBoardExists(t *testing.T) {
+	f := newFixture(t, true, false)
+	f.run(t)
+
+	if _, err := os.Stat(filepath.Join(f.dir, "kanban", boardFile)); !os.IsNotExist(err) {
+		t.Fatalf("the test wrote a board after all: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(f.dir, "state", channelsFile))
+	if err != nil {
+		t.Fatalf("a guard that started without a board wrote no channel map: %v", err)
+	}
+	if !strings.Contains(string(data), discord.ChannelManagers) {
+		t.Fatalf("channels.json names no %s: %s", discord.ChannelManagers, data)
+	}
 }
 
 // The reconciled channel ids are what `snowfarm apply` fills each manager

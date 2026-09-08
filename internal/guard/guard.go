@@ -271,11 +271,19 @@ func (g *Guard) open(r *roster.Roster) error {
 	}
 	g.ledger = ledger
 
-	reader, err := board.Open(filepath.Join(r.Farm.KanbanHome, boardFile))
+	boardPath := filepath.Join(r.Farm.KanbanHome, boardFile)
+	reader, err := board.Open(boardPath)
 	if err != nil {
 		return err
 	}
 	g.board = reader
+	// A fresh host has no board until a Hermes process creates one, and the
+	// guard is what reconciles the guild the first gateway needs, so it says
+	// so and carries on rather than refusing to start.
+	if err := reader.Reachable(context.Background()); err != nil {
+		g.log.Warn("the board cannot be read yet, so every pass that reads it fails until Hermes creates it",
+			"path", boardPath, "error", err)
+	}
 
 	vars, ok := g.secretsFor(secrets.SupervisorName)
 	if !ok || vars["DISCORD_BOT_TOKEN"] == "" {

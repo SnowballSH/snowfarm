@@ -569,9 +569,48 @@ func TestOpenIsReadOnly(t *testing.T) {
 	}
 }
 
-func TestOpenMissingDatabase(t *testing.T) {
-	if _, err := Open(filepath.Join(t.TempDir(), "absent.db")); err == nil {
-		t.Fatal("open of a missing database succeeded, want an error")
+// The board is Hermes' file, and on a fresh host nothing has created it when
+// the supervisor first starts. Opening must therefore succeed and reading
+// must fail, so the guard can go on and reconcile the guild — and must start
+// answering the moment the board appears, without a restart.
+func TestOpenBeforeTheBoardExists(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kanban.db")
+	reader, err := Open(path)
+	if err != nil {
+		t.Fatalf("open a board that does not exist yet: %v", err)
+	}
+	defer func() {
+		if err := reader.Close(); err != nil {
+			t.Fatalf("close reader: %v", err)
+		}
+	}()
+	ctx := context.Background()
+	if err := reader.Reachable(ctx); err == nil {
+		t.Fatal("a board that does not exist reported itself reachable")
+	}
+	if _, err := reader.Counts(ctx); err == nil {
+		t.Fatal("counting cards on a board that does not exist succeeded")
+	}
+
+	created := writeBoard(t, baseTasks(), nil, nil)
+	moved, err := os.ReadFile(created)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, moved, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := reader.Reachable(ctx); err != nil {
+		t.Fatalf("the board appeared and is still unreachable: %v", err)
+	}
+	counts, err := reader.Counts(ctx)
+	if err != nil {
+		t.Fatalf("count cards once the board exists: %v", err)
+	}
+	if len(counts) == 0 {
+		t.Fatal("no counts from the board that just appeared")
 	}
 }
 

@@ -63,15 +63,25 @@ func (s NotifierSub) Target() string {
 	return s.ChatID
 }
 
+// Open prepares a read-only handle on the board. It connects on the first
+// read rather than here: on a fresh host the board does not exist until a
+// Hermes process creates it, and refusing to open would stop the supervisor
+// that has to reconcile the guild before any gateway can run. Every read
+// reports the board as unreachable until the file appears.
 func Open(path string) (*Reader, error) {
 	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("open board %s: %w", path, err)
 	}
-	if err := db.Ping(); err != nil {
-		return nil, errors.Join(fmt.Errorf("open board %s: %w", path, err), db.Close())
-	}
 	return &Reader{db: db, path: path}, nil
+}
+
+// Reachable reports whether the board can be read now.
+func (r *Reader) Reachable(ctx context.Context) error {
+	if err := r.db.PingContext(ctx); err != nil {
+		return fmt.Errorf("open board %s: %w", r.path, err)
+	}
+	return nil
 }
 
 func (r *Reader) Close() error {
