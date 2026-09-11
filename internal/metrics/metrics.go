@@ -92,7 +92,7 @@ func New() *Registry {
 		PinDrift: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: namespace,
 			Name:      "pin_drift",
-			Help:      "1 when the installed Hermes does not report the pinned commit.",
+			Help:      "Whether the Hermes checkout is at the pinned commit: 0 it is, 1 it is not, 2 the probe could not compare them.",
 		}),
 		ModelgateKeyAgeSeconds: gauge("modelgate_key_age_seconds",
 			"Age of each agent's modelgate key, from the mint date the roster records.", "agent"),
@@ -145,6 +145,10 @@ func New() *Registry {
 	// farm whose weekly probe has not run yet, or has nothing to check, must
 	// not report a refused Google grant from the moment it starts.
 	r.GoogleTokenHealthy.Set(1)
+	// pin_drift is the mirror case: zero is its healthy value, so a farm
+	// whose weekly probe has not run yet, or could not compare the checkout
+	// against the pin, must not report that it runs the pinned Hermes.
+	r.PinDrift.Set(2)
 	return r
 }
 

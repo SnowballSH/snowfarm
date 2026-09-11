@@ -101,7 +101,7 @@ every ledger, counts the runs, and is the only writer of
 | `/etc/snowfarm/secrets` | 0700 | `snowfarm` | the per-agent age files (a 0400 directory has no search bit) |
 | `/etc/snowfarm/secrets/<agent>.age` | 0400 | `snowfarm` | that agent's variables, encrypted |
 | `/etc/snowfarm/secrets/supervisor.age` | 0400 | `snowfarm` | the guard's own credentials — the supervisor bot token and its probe key. It is not a roster agent and no uid is served it |
-| `/etc/snowfarm/pins.yaml` | — | `snowfarm` | `hermes.commit`, the full forty-character hash the drift probe compares the checkout's `HEAD` against; an abbreviated value is a probe error, not a match |
+| `/etc/snowfarm/pins.yaml` | — | `snowfarm` | `hermes.commit`, the full forty-character hash the drift probe compares the checkout's `HEAD` against; an abbreviated value is a probe error, not a match, and leaves `snowfarm_pin_drift` at **2**, the value that means the probe could not compare. A missing file or an empty `hermes.commit` is the same 2: nothing was checked |
 | `/etc/snowfarm/soul` | 0755 | `root:root` | the persona directory, `farm.soul_dir` |
 | `/etc/snowfarm/soul/<agent>.md` | 0644 | `root:root` | that agent's persona paragraphs |
 
@@ -337,7 +337,7 @@ Beyond that the guard runs only:
 | Command or request | Purpose |
 |---|---|
 | `journalctl --no-pager -o json --output-fields=MESSAGE,PRIORITY [--since @<epoch>] <user-unit matches>` | the exit status and output of one transient run unit |
-| `git -c safe.directory=<farm.hermes_checkout> -C <farm.hermes_checkout> rev-parse HEAD` | the weekly Hermes pin-drift probe. The checkout is root-owned and the guard is not root, so `safe.directory` is passed on the command line — a protected scope git honours — rather than parsing a banner that never carried `HEAD` |
+| `git -c safe.directory=<farm.hermes_checkout> -C <farm.hermes_checkout> rev-parse HEAD` | the weekly Hermes pin-drift probe. The checkout is root-owned and the guard is not root, so `safe.directory` is passed on the command line — a protected scope git honours — rather than parsing a banner that never carried `HEAD`. `snowfarm_pin_drift` reads **0** when `HEAD` is the pinned commit, **1** when it is not, and **2** when the command could not answer — an absent checkout, one `snowfarm` cannot read, one that is not a git repository — which is also the value a registry carries before the first weekly pass. Nothing else in snowfarm touches this path, so 2 is the only signal that the checkout is wrong, and it is the reason to alert on anything other than 0 rather than on 1 alone |
 | `GET <farm.modelgate.api>/models`, with the supervisor's own key | the model-gateway liveness probe |
 | `POST https://oauth2.googleapis.com/token` | the weekly refresh-grant probe on a stored Google token |
 

@@ -269,6 +269,10 @@ func TestPinDriftReadsTheInstalledCheckout(t *testing.T) {
 	}
 }
 
+// A probe that cannot compare the checkout against the pin must not leave
+// snowfarm_pin_drift reporting that the farm runs the pinned Hermes: zero is
+// the value the family is born at and the one an operator reads as healthy,
+// so an unanswerable pass reports the reserved unchecked value instead.
 func TestPinDriftRefusesWhatItCannotCompare(t *testing.T) {
 	checkout, head := hermesCheckout(t)
 	for _, tc := range []struct {
@@ -294,7 +298,19 @@ func TestPinDriftRefusesWhatItCannotCompare(t *testing.T) {
 			if posts := env.posts.all(); len(posts) != 0 {
 				t.Fatalf("an unanswerable probe posted %v", posts)
 			}
+			if got := testutil.ToFloat64(env.reg.PinDrift); got != pinUnchecked {
+				t.Fatalf("pin_drift is %v after a probe that could not compare, want %v", got, float64(pinUnchecked))
+			}
 		})
+	}
+}
+
+// The gauge a fresh registry carries is the same claim the weekly probe makes
+// once it has looked, so a farm whose probe has not run yet must not report
+// that it runs the pinned commit.
+func TestPinDriftIsUncheckedBeforeAnyProbe(t *testing.T) {
+	if got := testutil.ToFloat64(metrics.New().PinDrift); got != pinUnchecked {
+		t.Fatalf("a registry reports pin_drift %v before any probe has run, want %v", got, float64(pinUnchecked))
 	}
 }
 
