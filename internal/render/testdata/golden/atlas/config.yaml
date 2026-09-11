@@ -89,8 +89,5 @@ secrets:
   command:
     enabled: true
     command: /usr/local/bin/snowfarm secret-env
-session_reset:
-  mode: daily
-  at_hour: 3
 approvals:
   mode: smart

@@ -246,7 +246,7 @@ subscribes it to a channel so the outcome is reported there.
 | `hygiene_interval` | `5m` | positive; the sweep that hashes profiles, sizes the board and removes forged notifier subscriptions |
 | `housekeeping_passes` | `true` | an explicit `false` suspends the maintenance pass, and never the guard's own backstop |
 | `drained_restarts` | `false` | arms the nightly drained restart. While it is off the restarter runs no pass at all and says once in the log why |
-| `restart_window` | `04:00-05:00` | the window the nightly restart uses once it is armed |
+| `restart_window` | `04:00-05:00` | the window the nightly restart uses once it is armed. It is also the only session boundary a manager has: gateway conversations at the pinned Hermes never reset on a timer or at a daily hour, so a manager keeps one continuous, compacted conversation until a restart or an explicit `/new` |
 | `turn_log_pattern` | none | must compile; matches the gateway log line that opens a manager's turn. **Required while `drained_restarts` is on** |
 | `turn_complete_pattern` | none | must compile; matches the line that closes one. **Required while `drained_restarts` is on**: a turn-start line alone never proves the turn ended |
 

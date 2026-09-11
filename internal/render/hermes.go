@@ -27,8 +27,6 @@ const (
 	toolProgress    = "log"
 	secretsHelper   = "/usr/local/bin/snowfarm secret-env"
 
-	sessionResetMode   = "daily"
-	sessionResetHour   = 3
 	maxInProgress      = 1
 	kanbanFailureLimit = 2
 )
@@ -65,7 +63,6 @@ type hermesConfig struct {
 	Kanban           kanbanConfig              `yaml:"kanban"`
 	Security         securityConfig            `yaml:"security"`
 	Secrets          secretsConfig             `yaml:"secrets"`
-	SessionReset     *sessionResetConfig       `yaml:"session_reset,omitempty"`
 	Approvals        approvalsConfig           `yaml:"approvals"`
 	MCPServers       map[string]mcpServer      `yaml:"mcp_servers,omitempty"`
 }
@@ -140,11 +137,6 @@ type secretsCommand struct {
 	Command string `yaml:"command"`
 }
 
-type sessionResetConfig struct {
-	Mode   string `yaml:"mode"`
-	AtHour int    `yaml:"at_hour"`
-}
-
 type approvalsConfig struct {
 	Mode string `yaml:"mode"`
 }
@@ -217,7 +209,6 @@ func hermesConfigFor(r *roster.Roster, a roster.Agent) hermesConfig {
 			InterimAssistantMessages: false,
 			CleanupProgress:          true,
 		}}
-		config.SessionReset = &sessionResetConfig{Mode: sessionResetMode, AtHour: sessionResetHour}
 	}
 	return config
 }

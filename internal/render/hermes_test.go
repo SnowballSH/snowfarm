@@ -116,6 +116,9 @@ func TestHermesInvariants(t *testing.T) {
 		if _, present := doc["model"].(map[string]any)["max_tokens"]; present {
 			t.Fatalf("%s: model.max_tokens has no reader at the pinned Hermes; the provider's default applies whatever is rendered", a.Name)
 		}
+		if _, present := doc["session_reset"]; present {
+			t.Fatalf("%s: session_reset is legacy at the pinned Hermes and ignored; the restart window is the only session boundary", a.Name)
+		}
 		if root, _ := doc["toolsets"].([]any); !slices.Equal(root, []any{"kanban"}) {
 			t.Fatalf("%s: the root toolsets list is the gate for the orchestrator kanban tools and nothing else; got %v", a.Name, root)
 		}
