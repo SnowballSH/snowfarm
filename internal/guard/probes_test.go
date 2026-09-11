@@ -270,9 +270,11 @@ func TestPinDriftReadsTheInstalledCheckout(t *testing.T) {
 }
 
 // A probe that cannot compare the checkout against the pin must not leave
-// snowfarm_pin_drift reporting that the farm runs the pinned Hermes: zero is
-// the value the family is born at and the one an operator reads as healthy,
-// so an unanswerable pass reports the reserved unchecked value instead.
+// snowfarm_pin_drift reporting what the last pass that could answer said, nor
+// the zero the family is born at, which an operator reads as healthy: an
+// unanswerable pass reports the reserved unchecked value instead. Each case
+// drives an answering pass first, so the gauge has to be written back rather
+// than merely left where the registry was born.
 func TestPinDriftRefusesWhatItCannotCompare(t *testing.T) {
 	checkout, head := hermesCheckout(t)
 	for _, tc := range []struct {
@@ -286,11 +288,20 @@ func TestPinDriftRefusesWhatItCannotCompare(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			probes, env := newProbes(t)
-			probes.PinsPath = writePins(t, tc.pinned)
+			probes.PinsPath = writePins(t, head)
 			r := env.roster.Load()
+			r.Farm.HermesCheckout = checkout
+			env.roster.Store(r)
+			if err := probes.Weekly(context.Background()); err != nil {
+				t.Fatalf("the answering pass failed: %v", err)
+			}
+			if got := testutil.ToFloat64(env.reg.PinDrift); got != pinMatches {
+				t.Fatalf("a pass that compared the checkout against its own pin reports %v, want %v", got, float64(pinMatches))
+			}
+
+			probes.PinsPath = writePins(t, tc.pinned)
 			r.Farm.HermesCheckout = tc.checkout
 			env.roster.Store(r)
-
 			err := probes.Weekly(context.Background())
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("want an error naming %q, got %v", tc.want, err)
