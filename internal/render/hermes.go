@@ -17,6 +17,11 @@ const (
 	auxiliaryModel  = "gpt-5.6-luna"
 	auxiliaryEffort = "low"
 
+	kanbanToolset   = "kanban"
+	platformCLI     = "cli"
+	platformCron    = "cron"
+	platformDiscord = "discord"
+
 	terminalBackend = "local"
 	approvalsMode   = "smart"
 	toolProgress    = "log"
@@ -44,24 +49,30 @@ var (
 		"triage_specifier",
 		"vision",
 	}
-	managerServerActions = []string{"fetch_messages"}
+	managerServerActions  = []string{"fetch_messages"}
+	rootToolsets          = []string{kanbanToolset}
+	platformBoundToolsets = map[string]string{
+		"discord":       platformDiscord,
+		"discord_admin": platformDiscord,
+	}
 )
 
 type hermesConfig struct {
-	Model        modelConfig               `yaml:"model"`
-	Providers    map[string]providerConfig `yaml:"providers"`
-	Agent        agentConfig               `yaml:"agent"`
-	Auxiliary    map[string]auxConfig      `yaml:"auxiliary"`
-	Toolsets     []string                  `yaml:"toolsets"`
-	Terminal     terminalConfig            `yaml:"terminal"`
-	Discord      *discordConfig            `yaml:"discord,omitempty"`
-	Display      displayConfig             `yaml:"display"`
-	Kanban       kanbanConfig              `yaml:"kanban"`
-	Security     securityConfig            `yaml:"security"`
-	Secrets      secretsConfig             `yaml:"secrets"`
-	SessionReset *sessionResetConfig       `yaml:"session_reset,omitempty"`
-	Approvals    approvalsConfig           `yaml:"approvals"`
-	MCPServers   map[string]mcpServer      `yaml:"mcp_servers,omitempty"`
+	Model            modelConfig               `yaml:"model"`
+	Providers        map[string]providerConfig `yaml:"providers"`
+	Agent            agentConfig               `yaml:"agent"`
+	Auxiliary        map[string]auxConfig      `yaml:"auxiliary"`
+	Toolsets         []string                  `yaml:"toolsets"`
+	PlatformToolsets platformToolsets          `yaml:"platform_toolsets"`
+	Terminal         terminalConfig            `yaml:"terminal"`
+	Discord          *discordConfig            `yaml:"discord,omitempty"`
+	Display          displayConfig             `yaml:"display"`
+	Kanban           kanbanConfig              `yaml:"kanban"`
+	Security         securityConfig            `yaml:"security"`
+	Secrets          secretsConfig             `yaml:"secrets"`
+	SessionReset     *sessionResetConfig       `yaml:"session_reset,omitempty"`
+	Approvals        approvalsConfig           `yaml:"approvals"`
+	MCPServers       map[string]mcpServer      `yaml:"mcp_servers,omitempty"`
 }
 
 type modelConfig struct {
@@ -86,6 +97,12 @@ type auxConfig struct {
 	Provider        string `yaml:"provider"`
 	Model           string `yaml:"model"`
 	ReasoningEffort string `yaml:"reasoning_effort"`
+}
+
+type platformToolsets struct {
+	CLI     []string `yaml:"cli,omitempty"`
+	Cron    []string `yaml:"cron,omitempty"`
+	Discord []string `yaml:"discord,omitempty"`
 }
 
 type terminalConfig struct {
@@ -184,10 +201,11 @@ func hermesConfigFor(r *roster.Roster, a roster.Agent) hermesConfig {
 			ReasoningEffort:  a.Reasoning,
 			DisabledToolsets: a.DisabledToolsets,
 		},
-		Auxiliary: auxiliary(),
-		Toolsets:  a.Toolsets,
-		Terminal:  terminalConfig{Backend: terminalBackend, CWD: a.Home(r.Farm)},
-		Display:   displayConfig{ToolProgress: toolProgress},
+		Auxiliary:        auxiliary(),
+		Toolsets:         rootToolsets,
+		PlatformToolsets: platformToolsetsFor(a),
+		Terminal:         terminalConfig{Backend: terminalBackend, CWD: a.Home(r.Farm)},
+		Display:          displayConfig{ToolProgress: toolProgress},
 		Kanban: kanbanConfig{
 			DispatchInGateway:       false,
 			ReviewDispatch:          false,
@@ -216,6 +234,27 @@ func maxTokens(a roster.Agent) int {
 		return workerMaxTokens
 	}
 	return managerMaxTokens
+}
+
+func platformToolsetsFor(a roster.Agent) platformToolsets {
+	if a.Tier == roster.TierWorker {
+		return platformToolsets{CLI: toolsetsOn(platformCLI, a.Toolsets)}
+	}
+	return platformToolsets{
+		Cron:    toolsetsOn(platformCron, a.Toolsets),
+		Discord: toolsetsOn(platformDiscord, a.Toolsets),
+	}
+}
+
+func toolsetsOn(platform string, toolsets []string) []string {
+	out := make([]string, 0, len(toolsets))
+	for _, toolset := range toolsets {
+		if bound, ok := platformBoundToolsets[toolset]; ok && bound != platform {
+			continue
+		}
+		out = append(out, toolset)
+	}
+	return out
 }
 
 func auxiliary() map[string]auxConfig {

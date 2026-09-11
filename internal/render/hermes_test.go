@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"flag"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -112,12 +113,27 @@ func TestHermesInvariants(t *testing.T) {
 		if kanban["dispatch_in_gateway"] != false {
 			t.Fatalf("%s: dispatch must be disabled", a.Name)
 		}
-		toolsets := doc["toolsets"].([]any)
-		if !slices.Contains(toolsets, any("kanban")) {
-			t.Fatalf("%s: every agent needs the kanban toolset, or no card can terminate", a.Name)
+		if root, _ := doc["toolsets"].([]any); !slices.Equal(root, []any{"kanban"}) {
+			t.Fatalf("%s: the root toolsets list is the gate for the orchestrator kanban tools and nothing else; got %v", a.Name, root)
 		}
-		if !slices.Contains(toolsets, any("skills")) || !slices.Contains(toolsets, any("terminal")) {
-			t.Fatalf("%s: terminal and skills must both survive, or Claude Code is unreachable", a.Name)
+		platforms, _ := doc["platform_toolsets"].(map[string]any)
+		wantPlatforms := []string{"cli"}
+		if a.Tier == roster.TierManager {
+			wantPlatforms = []string{"cron", "discord"}
+		}
+		if got := slices.Sorted(maps.Keys(platforms)); !slices.Equal(got, wantPlatforms) {
+			t.Fatalf("%s: platform_toolsets names %v, but a %s runs on %v", a.Name, got, a.Tier, wantPlatforms)
+		}
+		for platform, raw := range platforms {
+			toolsets := raw.([]any)
+			for _, needed := range []any{"kanban", "terminal", "skills"} {
+				if !slices.Contains(toolsets, needed) {
+					t.Fatalf("%s: platform %s lacks %s, so Claude Code is unreachable or no card can terminate", a.Name, platform, needed)
+				}
+			}
+			if platform != "discord" && slices.Contains(toolsets, any("discord")) {
+				t.Fatalf("%s: the discord toolset is bound to the discord platform; Hermes drops it from %s", a.Name, platform)
+			}
 		}
 		if fileNamed(files, "skills/farm-claude-code/SKILL.md") == nil {
 			t.Fatalf("%s: the farm-claude-code skill was not rendered", a.Name)

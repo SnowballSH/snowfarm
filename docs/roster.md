@@ -137,7 +137,7 @@ same uid is a validation error naming both: rename one.
 | `model` | — | required; the default model in the rendered profile |
 | `reasoning` | — | one of `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
 | `discord_application_id` | — | required on a manager, and must be empty on a worker: workers hold no Discord application |
-| `toolsets` | — | must list `terminal` and `skills`, or Claude Code is unreachable; must list `kanban`, without which there is no `kanban_complete` and no card can terminate. One `mcp-<name>` entry per `mcp_servers` entry |
+| `toolsets` | — | must list `terminal` and `skills`, or Claude Code is unreachable; must list `kanban`, without which there is no `kanban_complete` and no card can terminate. One `mcp-<name>` entry per `mcp_servers` entry. Rendered as `platform_toolsets` for the platforms the tier runs on (below); the root `toolsets` key carries `kanban` alone |
 | `disabled_toolsets` | none | must not list `terminal` or `skills`; on a worker must not list `kanban` |
 | `skills` | — | must list `farm-claude-code`, or the skill body never reaches the model. Each entry must also be a skill this supervisor ships — `farm-claude-code`, `farm-subscribe` — which `plan` and `apply` check when they render the profile, not the loader |
 | `limits.slice_mib` | — | positive; the agent's slice `MemoryMax`, with `MemoryHigh` at 85% of it |
@@ -153,6 +153,24 @@ same uid is a validation error naming both: rename one.
 
 `--only` must name a subset of the **enabled** set: naming a disabled agent
 asks for work `apply` will not do, and naming an unknown one is a typo.
+
+### Which platforms a tier runs on
+
+Hermes resolves an agent's tools per **platform**, from
+`platform_toolsets.<platform>`, and falls back to the platform's own full
+composite when the key is absent — the root `toolsets` list is not consulted.
+So the renderer writes the roster's list under every platform the tier runs
+on, and nothing else:
+
+| Tier | Platforms | Because |
+|---|---|---|
+| manager | `discord`, `cron` | the gateway serves Discord; the `farm-report` job runs on the cron platform |
+| worker | `cli` | the dispatcher spawns a worker as `hermes -p <name> --cli … chat -q`, pinned to the profile's `cli` list |
+
+`discord` and `discord_admin` are bound to the `discord` platform and are
+left out of every other list, as Hermes would drop them. The root `toolsets`
+key is rendered as `[kanban]`: it is read only as the gate for the
+orchestrator kanban tools.
 
 ### What a worker keeps
 

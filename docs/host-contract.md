@@ -57,7 +57,7 @@ tools, `file` operations and Claude Code runs execute on the host as
 | `/etc/systemd/system/snowfarm-guard.service` | 0644 | `root:root` | rendered from the roster's paths |
 | `/etc/systemd/system/user-<uid>.slice.d/50-snowfarm.conf` | 0644 | `root:root` | `MemoryMax`, `MemoryHigh` (85% of it), `MemorySwapMax=0`, `CPUQuota` |
 | `/usr/local/lib/snowfarm/limits/<agent>` | 0644 | `root:root` | `RUN_MEMORY_MAX`, `RUN_TASKS_MAX`, `RUN_MAX_ITERATIONS` (agents with `limits.run_mib`) |
-| `/var/lib/farm/<agent>/.hermes/profiles/<agent>/config.yaml` | 0640 | `root:farm-<agent>` | rendered; **immutable** |
+| `/var/lib/farm/<agent>/.hermes/profiles/<agent>/config.yaml` | 0640 | `root:farm-<agent>` | rendered; **immutable**. Its `platform_toolsets` carries the roster's toolsets under the platforms the tier runs on — `discord` and `cron` for a manager, `cli` for a worker — and its root `toolsets` is `[kanban]`, the orchestrator-tool gate |
 | `/var/lib/farm/<agent>/.hermes/profiles/<agent>/SOUL.md` | 0640 | `root:farm-<agent>` | rendered; **immutable** |
 | `/var/lib/farm/<agent>/.hermes/profiles/<agent>/skills/<skill>/SKILL.md` | 0600 | `farm-<agent>:farm-<agent>` | rendered from the supervisor's own skill bodies |
 | `/var/lib/farm/<manager>/.config/systemd/user/hermes-gateway.service` | 0644 | `farm-<manager>:farm-<manager>` | rendered; a unit still carrying `pending-reconcile` is installed and **not** started |

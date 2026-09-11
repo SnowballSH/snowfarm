@@ -45,11 +45,14 @@ auxiliary:
     reasoning_effort: low
 toolsets:
   - kanban
-  - terminal
-  - file
-  - web
-  - memory
-  - skills
+platform_toolsets:
+  cli:
+    - kanban
+    - terminal
+    - file
+    - web
+    - memory
+    - skills
 terminal:
   backend: local
   cwd: /var/lib/farm/hypatia

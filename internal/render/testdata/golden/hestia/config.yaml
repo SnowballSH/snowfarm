@@ -45,13 +45,16 @@ auxiliary:
     reasoning_effort: low
 toolsets:
   - kanban
-  - terminal
-  - file
-  - web
-  - memory
-  - vision
-  - skills
-  - mcp-google-calendar
+platform_toolsets:
+  cli:
+    - kanban
+    - terminal
+    - file
+    - web
+    - memory
+    - vision
+    - skills
+    - mcp-google-calendar
 terminal:
   backend: local
   cwd: /var/lib/farm/hestia

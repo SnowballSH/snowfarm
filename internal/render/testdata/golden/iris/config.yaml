@@ -45,14 +45,26 @@ auxiliary:
     reasoning_effort: low
 toolsets:
   - kanban
-  - web
-  - file
-  - memory
-  - vision
-  - cronjob
-  - terminal
-  - discord
-  - skills
+platform_toolsets:
+  cron:
+    - kanban
+    - web
+    - file
+    - memory
+    - vision
+    - cronjob
+    - terminal
+    - skills
+  discord:
+    - kanban
+    - web
+    - file
+    - memory
+    - vision
+    - cronjob
+    - terminal
+    - discord
+    - skills
 terminal:
   backend: local
   cwd: /var/lib/farm/iris

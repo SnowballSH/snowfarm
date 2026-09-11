@@ -45,12 +45,15 @@ auxiliary:
     reasoning_effort: low
 toolsets:
   - kanban
-  - terminal
-  - file
-  - web
-  - memory
-  - skills
-  - mcp-grafana
+platform_toolsets:
+  cli:
+    - kanban
+    - terminal
+    - file
+    - web
+    - memory
+    - skills
+    - mcp-grafana
 terminal:
   backend: local
   cwd: /var/lib/farm/argus
