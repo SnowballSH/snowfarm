@@ -76,15 +76,11 @@ func TestHermesGolden(t *testing.T) {
 				if !bytes.Equal(want, f.Content) {
 					t.Fatalf("%s differs from golden", rel)
 				}
-				wantOwner, wantMode := a.User(), fs.FileMode(0o600)
-				if rel == "config.yaml" || rel == "SOUL.md" {
-					wantOwner, wantMode = "root", fs.FileMode(0o640)
+				if f.Owner != rootOwner || f.Group != a.User() {
+					t.Fatalf("%s owner %s:%s, want %s:%s: an agent that owns a file apply renders can rewrite it", rel, f.Owner, f.Group, rootOwner, a.User())
 				}
-				if f.Owner != wantOwner || f.Group != a.User() {
-					t.Fatalf("%s owner %s:%s, want %s:%s", rel, f.Owner, f.Group, wantOwner, a.User())
-				}
-				if f.Mode.Perm() != wantMode {
-					t.Fatalf("%s mode %v, want %v", rel, f.Mode.Perm(), wantMode)
+				if f.Mode.Perm() != rootOwnedMode {
+					t.Fatalf("%s mode %v, want %v: the agent reads what apply rendered and writes none of it", rel, f.Mode.Perm(), rootOwnedMode)
 				}
 			}
 			for _, stale := range staleGoldens(t, filepath.Join("testdata", "golden", a.Name), rendered) {

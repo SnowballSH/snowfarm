@@ -35,6 +35,7 @@ const (
 
 	userUnitDir     = ".config/systemd/user"
 	gatewayUnitName = "hermes-gateway.service"
+	skillsDir       = "skills"
 
 	// pendingChannels is what the renderer writes into a manager unit whose
 	// channel ids the guard has not resolved yet; a unit carrying it is
@@ -108,6 +109,14 @@ type fileSpec struct {
 	// Claude Code slot locks.
 	Keep bool
 }
+
+// checksOwner marks the paths where ownership is the control rather than a
+// detail of the install: root owns what an agent must be able to read and
+// never rewrite, and a frozen ancestor the agent no longer owns is a profile
+// moved aside rather than protected.
+func (d dirSpec) checksOwner() bool { return d.Frozen || d.Owner == rootOwner }
+
+func (f fileSpec) checksOwner() bool { return f.File.Owner == rootOwner }
 
 type userSpec struct {
 	Name  string
@@ -331,7 +340,10 @@ func sharedDirs(r *roster.Roster) []dirSpec {
 
 // agentDirs is the agent's own tree. The two ancestors of the profile are
 // agent-owned and 0755 so V6d's red side can fall, and frozen so the agent
-// cannot rename or replace the profile the flags on the files protect.
+// cannot rename or replace the profile the flags on the files protect. The
+// skill directories are root's: the files in them carry no immutable flag, so
+// the directory's write bit is what stops the agent unlinking or replacing
+// one.
 func agentDirs(r *roster.Roster, agent roster.Agent) []dirSpec {
 	home := agent.Home(r.Farm)
 	profile := agent.HermesHome(r.Farm)
@@ -342,6 +354,16 @@ func agentDirs(r *roster.Roster, agent roster.Agent) []dirSpec {
 		{Path: path.Join(home, ".hermes", "profiles"), Mode: profileDirMode, Owner: owner, Group: group, Agent: agent.Name, Frozen: true},
 		{Path: profile, Mode: dirMode, Owner: owner, Group: group, Agent: agent.Name},
 		{Path: path.Join(profile, "logs"), Mode: dirMode, Owner: owner, Group: group, Agent: agent.Name},
+		{Path: path.Join(profile, skillsDir), Mode: dirMode, Owner: rootOwner, Group: group, Agent: agent.Name},
+	}
+	for _, skill := range agent.Skills {
+		dirs = append(dirs, dirSpec{
+			Path:  path.Join(profile, skillsDir, skill),
+			Mode:  dirMode,
+			Owner: rootOwner,
+			Group: group,
+			Agent: agent.Name,
+		})
 	}
 	if agent.Tier != roster.TierManager {
 		return dirs
@@ -456,10 +478,10 @@ func (a *Applier) dirChange(d dirSpec) (Change, bool, error) {
 	if got := permBits(info.Mode()); got != d.Mode {
 		reasons = append(reasons, fmt.Sprintf("mode %s, want %s", modeString(got), modeString(d.Mode)))
 	}
+	if d.checksOwner() && !a.ownedBy(info, d.Owner) {
+		reasons = append(reasons, "owner is not "+d.Owner)
+	}
 	if d.Frozen {
-		if !a.ownedBy(info, d.Owner) {
-			reasons = append(reasons, "owner is not "+d.Owner)
-		}
 		frozen, err := a.immutable(target)
 		if err != nil {
 			return Change{}, false, err
@@ -523,6 +545,9 @@ func (a *Applier) fileChange(f fileSpec) (Change, bool, error) {
 	}
 	if got := permBits(info.Mode()); got != f.File.Mode {
 		reasons = append(reasons, fmt.Sprintf("mode %s, want %s", modeString(got), modeString(f.File.Mode)))
+	}
+	if f.checksOwner() && !a.ownedBy(info, f.File.Owner) {
+		reasons = append(reasons, "owner is not "+f.File.Owner)
 	}
 	if f.Frozen {
 		frozen, err := a.immutable(target)

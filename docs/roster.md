@@ -186,9 +186,11 @@ terminate a card. What bounds those three is not the profile:
   sweep, which blocks it and reports it in `#farm-status`. That is detection,
   once every `guard.hygiene_interval`, not prevention.
 - `config.yaml` and `SOUL.md` are root-owned and immutable, so `skill_manage`
-  cannot reach the model, the provider or the persona. The `skills/` directory
-  itself is the agent's own, and nothing removes or hashes a skill a worker
-  writes there.
+  cannot reach the model, the provider or the persona. The rendered skills are
+  root-owned too, in root-owned directories, so it cannot rewrite, unlink or
+  rename one either; what it can still do is rename the whole `skills/`
+  directory aside, which `snowfarm plan` reports and the guard's sweep does
+  not.
 - An MCP server's write tools are removed at the server, never in Hermes: the
   calendar server's `--enable-tools` list registers only the tools named, and
   its `manage-accounts` tool is registered outside that filter and stays.

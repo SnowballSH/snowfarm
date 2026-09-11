@@ -22,8 +22,8 @@ func Skills(a roster.Agent, home string) ([]File, error) {
 		}
 		files = append(files, File{
 			Path:    path.Join(home, "skills", name, "SKILL.md"),
-			Mode:    agentOwnedMode,
-			Owner:   a.User(),
+			Mode:    rootOwnedMode,
+			Owner:   rootOwner,
 			Group:   a.User(),
 			Content: body,
 		})
