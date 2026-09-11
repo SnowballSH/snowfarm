@@ -26,6 +26,7 @@ farm:
   kanban_home: /srv/snowfarm/kanban
   claude_dir: /srv/snowfarm/claude
   hermes_bin: /usr/local/bin/hermes
+  hermes_checkout: /usr/local/lib/hermes-agent
   soul_dir: /etc/snowfarm/soul
   location: America/New_York
   uid_base: 6000
@@ -113,7 +114,8 @@ guard:
 | `home_root` | `/var/lib/farm` | each agent's home is `<home_root>/<agent>` |
 | `kanban_home` | `/srv/snowfarm/kanban` | the board root every unit, mount and environment line cites. Hermes nests its tree under a `kanban/` subdirectory of it, so the workspaces and attachments roots are derived, not configured |
 | `claude_dir` | `/srv/snowfarm/claude` | holds `shared/slots`, `shared/limit-until` and `runs/` |
-| `hermes_bin` | `/usr/local/bin/hermes` | what apply and the pin-drift probe run |
+| `hermes_bin` | `/usr/local/bin/hermes` | what apply and every unit run |
+| `hermes_checkout` | `/usr/local/lib/hermes-agent` | must be an absolute path: the editable checkout the bootstrap installs Hermes from, whose `HEAD` the weekly pin-drift probe reads with `git rev-parse` and compares, in full, against `hermes.commit` in `/etc/snowfarm/pins.yaml`. There is no `hermes version` at the pin, and `--version` abbreviates `origin/main`, not `HEAD` |
 | `soul_dir` | `/etc/snowfarm/soul` | must be an absolute path: apply reads each agent's persona from it |
 | `location` | — | required, and must be an IANA zone the host's tzdata knows. It sets the manager report schedule and every schedule that names no location of its own |
 | `uid_base` | `6000` | must be at least `6000`; below that an agent would keep the instance-role reach the host's egress rule drops by uid |

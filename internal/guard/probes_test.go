@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -206,14 +207,20 @@ func TestHealthExportsBoardSizeAndKeyAge(t *testing.T) {
 	}
 }
 
-func writeHermes(t *testing.T, output string) string {
+func hermesCheckout(t *testing.T) (string, string) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "hermes")
-	script := "#!/bin/sh\nprintf '%s\\n' " + "'" + output + "'\n"
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
-		t.Fatalf("write fake hermes: %v", err)
+	dir := t.TempDir()
+	git := func(args ...string) string {
+		argv := append([]string{"-C", dir, "-c", "user.name=snowfarm", "-c", "user.email=snowfarm@example.invalid", "-c", "commit.gpgsign=false"}, args...)
+		out, err := exec.Command("git", argv...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
 	}
-	return path
+	git("init", "-q")
+	git("commit", "-q", "--allow-empty", "-m", "pinned")
+	return dir, git("rev-parse", "HEAD")
 }
 
 func writePins(t *testing.T, commit string) string {
@@ -225,21 +232,25 @@ func writePins(t *testing.T, commit string) string {
 	return path
 }
 
-func TestPinDriftComparesTheInstalledHermes(t *testing.T) {
-	const commit = "f6234d0a1b2c3d4e5f60718293a4b5c6d7e8f900"
+// The installed Hermes is an editable checkout, and its HEAD is the only
+// statement of which commit runs: there is no version subcommand at the pin,
+// and --version abbreviates origin/main rather than HEAD.
+func TestPinDriftReadsTheInstalledCheckout(t *testing.T) {
+	const other = "0123456789abcdef0123456789abcdef01234567"
+	checkout, head := hermesCheckout(t)
 	for _, tc := range []struct {
 		name   string
-		output string
+		pinned string
 		drift  float64
 	}{
-		{name: "the pinned commit", output: "hermes 2026.8.31 (" + commit + ")", drift: 0},
-		{name: "another commit", output: "hermes 2026.9.02 (0123456789abcdef0123456789abcdef01234567)", drift: 1},
+		{name: "the pinned commit", pinned: head, drift: 0},
+		{name: "another commit", pinned: other, drift: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			probes, env := newProbes(t)
-			probes.PinsPath = writePins(t, commit)
+			probes.PinsPath = writePins(t, tc.pinned)
 			r := env.roster.Load()
-			r.Farm.HermesBin = writeHermes(t, tc.output)
+			r.Farm.HermesCheckout = checkout
 			env.roster.Store(r)
 
 			if err := probes.Weekly(context.Background()); err != nil {
@@ -248,8 +259,40 @@ func TestPinDriftComparesTheInstalledHermes(t *testing.T) {
 			if got := testutil.ToFloat64(env.reg.PinDrift); got != tc.drift {
 				t.Fatalf("pin_drift is %v, want %v", got, tc.drift)
 			}
-			if tc.drift == 1 && len(env.posts.matching("pin")) != 1 {
+			if posts := env.posts.matching("pin"); len(posts) != int(tc.drift) {
 				t.Fatalf("drift posted %v", env.posts.all())
+			}
+			if tc.drift == 1 && !strings.Contains(env.posts.matching("pin")[0], head) {
+				t.Fatalf("the notice must name the commit that runs, got %v", env.posts.all())
+			}
+		})
+	}
+}
+
+func TestPinDriftRefusesWhatItCannotCompare(t *testing.T) {
+	checkout, head := hermesCheckout(t)
+	for _, tc := range []struct {
+		name     string
+		pinned   string
+		checkout string
+		want     string
+	}{
+		{name: "an abbreviated pin", pinned: head[:12], checkout: checkout, want: "full commit"},
+		{name: "a checkout that is not there", pinned: head, checkout: filepath.Join(t.TempDir(), "absent"), want: "absent"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			probes, env := newProbes(t)
+			probes.PinsPath = writePins(t, tc.pinned)
+			r := env.roster.Load()
+			r.Farm.HermesCheckout = tc.checkout
+			env.roster.Store(r)
+
+			err := probes.Weekly(context.Background())
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want an error naming %q, got %v", tc.want, err)
+			}
+			if posts := env.posts.all(); len(posts) != 0 {
+				t.Fatalf("an unanswerable probe posted %v", posts)
 			}
 		})
 	}

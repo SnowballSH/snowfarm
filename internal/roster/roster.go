@@ -34,13 +34,14 @@ type Farm struct {
 	WorkspacesRoot  string `yaml:"-"`
 	AttachmentsRoot string `yaml:"-"`
 
-	ClaudeDir string          `yaml:"claude_dir"`
-	HermesBin string          `yaml:"hermes_bin"`
-	SoulDir   string          `yaml:"soul_dir"`
-	Modelgate ModelgateConfig `yaml:"modelgate"`
-	Discord   DiscordConfig   `yaml:"discord"`
-	Location  string          `yaml:"location"`
-	UIDBase   int             `yaml:"uid_base"`
+	ClaudeDir      string          `yaml:"claude_dir"`
+	HermesBin      string          `yaml:"hermes_bin"`
+	HermesCheckout string          `yaml:"hermes_checkout"`
+	SoulDir        string          `yaml:"soul_dir"`
+	Modelgate      ModelgateConfig `yaml:"modelgate"`
+	Discord        DiscordConfig   `yaml:"discord"`
+	Location       string          `yaml:"location"`
+	UIDBase        int             `yaml:"uid_base"`
 }
 
 type ModelgateConfig struct {
@@ -153,6 +154,8 @@ const (
 	defaultHermesBin  = "/usr/local/bin/hermes"
 	defaultSoulDir    = "/etc/snowfarm/soul"
 
+	defaultHermesCheckout = "/usr/local/lib/hermes-agent"
+
 	defaultRestartWindow = "04:00-05:00"
 
 	managerIterations = 120
@@ -187,6 +190,7 @@ func (r *Roster) applyDefaults() {
 	defaultString(&r.Farm.KanbanHome, defaultKanbanHome)
 	defaultString(&r.Farm.ClaudeDir, defaultClaudeDir)
 	defaultString(&r.Farm.HermesBin, defaultHermesBin)
+	defaultString(&r.Farm.HermesCheckout, defaultHermesCheckout)
 	defaultString(&r.Farm.SoulDir, defaultSoulDir)
 	defaultInt(&r.Farm.UIDBase, uidFloor)
 

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -44,6 +45,7 @@ const (
 	boardFileWAL = "wal"
 
 	noticePinDrift = "pin_drift"
+	gitBin         = "git"
 
 	// googleRefused is the one thing snowfarm_google_token_healthy says
 	// about a token: Google would not honour it. It is the value A5 alerts
@@ -57,6 +59,8 @@ const (
 	// continuously on a farm whose consent ceremony has not happened yet.
 	googleTokenUnchecked = 1
 )
+
+var fullCommit = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 // Probes are the guard's outward checks: the model gateway every minute, the
 // manager units and the board's size on the health pass, and the Google
@@ -338,11 +342,15 @@ func (p *Probes) pinDrift(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	installed, err := hermesVersion(ctx, r.Farm.HermesBin)
+	if !fullCommit.MatchString(commit) {
+		return fmt.Errorf("%s: hermes.commit %q is not a full commit hash, so the checkout cannot be compared against it", p.PinsPath, commit)
+	}
+	checkout := r.Farm.HermesCheckout
+	installed, err := installedCommit(ctx, checkout)
 	if err != nil {
 		return err
 	}
-	if carriesCommit(installed, commit) {
+	if installed == commit {
 		p.Metrics.PinDrift.Set(0)
 		return nil
 	}
@@ -352,28 +360,26 @@ func (p *Probes) pinDrift(ctx context.Context) error {
 		return err
 	}
 	p.post(ctx, fmt.Sprintf(
-		"the installed Hermes reports %q, which does not carry the pinned commit %s; the farm is running something the pin does not describe",
-		installed, commit))
+		"the Hermes checkout at %s is at commit %s, not the pinned %s; the farm is running something the pin does not describe",
+		checkout, installed, commit))
 	return nil
 }
 
-func hermesVersion(ctx context.Context, bin string) (string, error) {
+// installedCommit reads HEAD from the checkout itself. The checkout is
+// root-owned and the guard is not, so safe.directory is passed on the command
+// line, a protected scope git honours.
+func installedCommit(ctx context.Context, checkout string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, bin, "version").Output() // #nosec G204 -- the path is the roster's own hermes_bin
+	out, err := exec.CommandContext(ctx, gitBin, "-c", "safe.directory="+checkout, "-C", checkout, "rev-parse", "HEAD").Output() // #nosec G204 -- the path is the roster's own hermes_checkout
 	if err != nil {
-		return "", fmt.Errorf("%s version: %w", bin, err)
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && len(exit.Stderr) > 0 {
+			return "", fmt.Errorf("git -C %s rev-parse HEAD: %w: %s", checkout, err, strings.TrimSpace(string(exit.Stderr)))
+		}
+		return "", fmt.Errorf("git -C %s rev-parse HEAD: %w", checkout, err)
 	}
 	return strings.TrimSpace(string(out)), nil
-}
-
-// carriesCommit accepts the abbreviations a version string may print instead
-// of the whole hash.
-func carriesCommit(version, commit string) bool {
-	if strings.Contains(version, commit) {
-		return true
-	}
-	return len(commit) >= 12 && strings.Contains(version, commit[:12])
 }
 
 func pinnedCommit(path string) (string, error) {

@@ -49,6 +49,9 @@ func (r *Roster) validateFarm() []error {
 	if !path.IsAbs(r.Farm.SoulDir) {
 		errs = append(errs, fmt.Errorf("farm.soul_dir %q must be an absolute path: apply reads each agent's persona from it", r.Farm.SoulDir))
 	}
+	if !path.IsAbs(r.Farm.HermesCheckout) {
+		errs = append(errs, fmt.Errorf("farm.hermes_checkout %q must be an absolute path: the pin-drift probe reads the installed commit from it", r.Farm.HermesCheckout))
+	}
 	if r.Farm.UIDBase < uidFloor {
 		errs = append(errs, fmt.Errorf("farm.uid_base is %d, below the floor %d the IMDS egress drop keys on", r.Farm.UIDBase, uidFloor))
 	}

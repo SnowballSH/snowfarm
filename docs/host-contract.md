@@ -6,8 +6,9 @@ runs there, and the checks that prove a host still matches. Read it with
 every row is an assertion, not a description.
 
 Paths are the roster's defaults. A roster that moves `farm.home_root`,
-`farm.kanban_home`, `farm.claude_dir` or `farm.soul_dir` moves every row that
-quotes them; the fields are in [`roster.md`](roster.md).
+`farm.kanban_home`, `farm.claude_dir`, `farm.soul_dir` or
+`farm.hermes_checkout` moves every row that quotes them; the fields are in
+[`roster.md`](roster.md).
 
 ## Accounts
 
@@ -93,13 +94,14 @@ every ledger, counts the runs, and is the only writer of
 |---|---|---|---|
 | `/usr/local/bin/snowfarm`, `/usr/local/bin/farm-claude` | 0755 | `root:root` | this repository's two binaries, verified against `SHA256SUMS` |
 | `/usr/local/bin/hermes`, `/usr/local/bin/claude` | 0755 | `root:root` | the pinned Hermes and Claude Code |
+| `/usr/local/lib/hermes-agent` | `go-w` | `root:root` | `farm.hermes_checkout`: the editable Hermes checkout and its venv, which the bootstrap clones and checks out at the pinned commit. Its `.git` must stay readable by `snowfarm`, which is what the pin-drift probe reads |
 | `/etc/snowfarm` | 0700 | `snowfarm` | everything the guard reads and no agent may |
 | `/etc/snowfarm/farm.yaml` | — | `snowfarm` | the roster |
 | `/etc/snowfarm/age.key` | 0400 | `snowfarm` | the identity that decrypts the secrets and the event log |
 | `/etc/snowfarm/secrets` | 0700 | `snowfarm` | the per-agent age files (a 0400 directory has no search bit) |
 | `/etc/snowfarm/secrets/<agent>.age` | 0400 | `snowfarm` | that agent's variables, encrypted |
 | `/etc/snowfarm/secrets/supervisor.age` | 0400 | `snowfarm` | the guard's own credentials — the supervisor bot token and its probe key. It is not a roster agent and no uid is served it |
-| `/etc/snowfarm/pins.yaml` | — | `snowfarm` | what the Hermes drift probe compares against |
+| `/etc/snowfarm/pins.yaml` | — | `snowfarm` | `hermes.commit`, the full forty-character hash the drift probe compares the checkout's `HEAD` against; an abbreviated value is a probe error, not a match |
 | `/etc/snowfarm/soul` | 0755 | `root:root` | the persona directory, `farm.soul_dir` |
 | `/etc/snowfarm/soul/<agent>.md` | 0644 | `root:root` | that agent's persona paragraphs |
 
@@ -335,7 +337,7 @@ Beyond that the guard runs only:
 | Command or request | Purpose |
 |---|---|
 | `journalctl --no-pager -o json --output-fields=MESSAGE,PRIORITY [--since @<epoch>] <user-unit matches>` | the exit status and output of one transient run unit |
-| `<farm.hermes_bin> version` | the Hermes pin-drift probe |
+| `git -c safe.directory=<farm.hermes_checkout> -C <farm.hermes_checkout> rev-parse HEAD` | the weekly Hermes pin-drift probe. The checkout is root-owned and the guard is not root, so `safe.directory` is passed on the command line — a protected scope git honours — rather than parsing a banner that never carried `HEAD` |
 | `GET <farm.modelgate.api>/models`, with the supervisor's own key | the model-gateway liveness probe |
 | `POST https://oauth2.googleapis.com/token` | the weekly refresh-grant probe on a stored Google token |
 
