@@ -10,10 +10,6 @@ providers:
     transport: chat_completions
 agent:
   reasoning_effort: xhigh
-  disabled_tools:
-    - skill_manage
-    - kanban_create
-    - kanban_link
 auxiliary:
   approval:
     provider: modelgate

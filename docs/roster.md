@@ -63,14 +63,13 @@ agents:
     reasoning: xhigh
     toolsets: [kanban, terminal, file, web, memory, skills, mcp-notes]
     skills: [farm-claude-code]
-    disabled_tools: [skill_manage, kanban_create, kanban_link]
     limits: {slice_mib: 2048, run_mib: 1792, cpu_percent: 150}
     env: [CLAUDE_CODE_OAUTH_TOKEN, FARM_MODELGATE_KEY, FARM_FORGE_TOKEN]
     allow_private_urls: true
     mcp_servers:
       - name: notes
         command: /usr/bin/node
-        args: [/usr/local/lib/notes-mcp/build/index.js]
+        args: [/usr/local/lib/notes-mcp/build/index.js, --enable-tools, "list-notes,read-note"]
         env: {NOTES_CREDENTIALS: /var/lib/farm/brio/notes/client.json}
         version: "2.6.3"
         sha256: ""
@@ -140,14 +139,13 @@ same uid is a validation error naming both: rename one.
 | `discord_application_id` | — | required on a manager, and must be empty on a worker: workers hold no Discord application |
 | `toolsets` | — | must list `terminal` and `skills`, or Claude Code is unreachable; must list `kanban`, without which there is no `kanban_complete` and no card can terminate. One `mcp-<name>` entry per `mcp_servers` entry |
 | `disabled_toolsets` | none | must not list `terminal` or `skills`; on a worker must not list `kanban` |
-| `disabled_tools` | none | a worker must list `skill_manage`, `kanban_create` and `kanban_link` — it keeps the kanban toolset and gives up only those three. Anything else here is added to the tier's own set |
 | `skills` | — | must list `farm-claude-code`, or the skill body never reaches the model. Each entry must also be a skill this supervisor ships — `farm-claude-code`, `farm-subscribe` — which `plan` and `apply` check when they render the profile, not the loader |
 | `limits.slice_mib` | — | positive; the agent's slice `MemoryMax`, with `MemoryHigh` at 85% of it |
 | `limits.cpu_percent` | — | positive; the slice `CPUQuota` |
 | `limits.run_mib` | — | positive on a worker; the `MemoryMax` on one transient run |
 | `env` | — | **names, never values.** Each must start with `FARM_`, or be `CLAUDE_CODE_OAUTH_TOKEN` or `DISCORD_BOT_TOKEN`. The list must include `CLAUDE_CODE_OAUTH_TOKEN`, or Claude Code fails on authentication. The values live in `/etc/snowfarm/secrets/<agent>.age` and reach the agent over the guard's socket |
 | `allow_private_urls` | `false` | lets this agent's `web` tools reach private addresses |
-| `mcp_servers` | none | `name`, `command`, `args`, `env`, `version`, `sha256`. Each needs its `mcp-<name>` toolset. `version` and `sha256` are provenance the operator's install ceremony pins; the fetch check is the integrity gate |
+| `mcp_servers` | none | `name`, `command`, `args`, `env`, `version`, `sha256`. Each needs its `mcp-<name>` toolset. `args` and `env` reach the rendered `mcp_servers.<name>` entry verbatim, so a server's own tool allow-list is written here — the calendar server's `--enable-tools <comma-list>` is the shipped example. `version` and `sha256` are provenance the operator's install ceremony pins; the fetch check is the integrity gate |
 | `max_iterations` | 120 manager, 80 worker | the gateway's `HERMES_MAX_ITERATIONS`, and a run's own ceiling |
 | `context_length` | — | positive; Hermes bounds its own context to it |
 | `enabled` | `false` | the phase gate. The guard dispatches for, schedules for and manages only enabled agents, and `apply` provisions only enabled agents, so an agent declared for a later phase is never dispatched-as before its account exists. A running guard picks up a change on `snowfarm reload`, never on `apply` alone |
@@ -155,6 +153,25 @@ same uid is a validation error naming both: rename one.
 
 `--only` must name a subset of the **enabled** set: naming a disabled agent
 asks for work `apply` will not do, and naming an unknown one is a typo.
+
+### What a worker keeps
+
+There is no per-tool field. The pinned Hermes filters tools by **toolset**
+only — `agent.disabled_toolsets` is read, `agent.disabled_tools` is read by
+nothing — so every worker keeps `skill_manage`, `kanban_create` and
+`kanban_link` along with the rest of the `kanban` toolset it needs to
+terminate a card. What bounds those three is not the profile:
+
+- A card a worker creates for another agent is caught by the guard's hygiene
+  sweep, which blocks it and reports it in `#farm-control`. That is detection
+  on a five-minute cadence, not prevention.
+- `config.yaml` and `SOUL.md` are root-owned and immutable, so `skill_manage`
+  cannot reach the model, the provider or the persona. The `skills/` directory
+  itself is the agent's own, and nothing removes or hashes a skill a worker
+  writes there.
+- An MCP server's write tools are removed at the server, never in Hermes: the
+  calendar server's `--enable-tools` list registers only the tools named, and
+  its `manage-accounts` tool is registered outside that filter and stays.
 
 ### `SOUL.md`
 

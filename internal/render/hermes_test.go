@@ -123,14 +123,8 @@ func TestHermesInvariants(t *testing.T) {
 			t.Fatalf("%s: the farm-claude-code skill was not rendered", a.Name)
 		}
 		agentCfg := doc["agent"].(map[string]any)
-		disabled := agentCfg["disabled_tools"].([]any)
-		if !slices.Contains(disabled, any("skill_manage")) {
-			t.Fatalf("%s: skill_manage must be disabled by name", a.Name)
-		}
-		wantsNoCreate := a.Tier == roster.TierWorker
-		hasNoCreate := slices.Contains(disabled, any("kanban_create")) && slices.Contains(disabled, any("kanban_link"))
-		if wantsNoCreate != hasNoCreate {
-			t.Fatalf("%s: kanban_create/kanban_link must be disabled on workers only", a.Name)
+		if _, present := agentCfg["disabled_tools"]; present {
+			t.Fatalf("%s: agent.disabled_tools has no reader at the pinned Hermes; rendering it promises a restriction that does not exist", a.Name)
 		}
 		term := doc["terminal"].(map[string]any)
 		if term["backend"] != "local" {

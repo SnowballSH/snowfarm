@@ -62,7 +62,6 @@ type Agent struct {
 	DiscordApplicationID string      `yaml:"discord_application_id,omitempty"`
 	Toolsets             []string    `yaml:"toolsets"`
 	DisabledToolsets     []string    `yaml:"disabled_toolsets,omitempty"`
-	DisabledTools        []string    `yaml:"disabled_tools,omitempty"`
 	Skills               []string    `yaml:"skills"`
 	Limits               Limits      `yaml:"limits"`
 	Env                  []string    `yaml:"env"`

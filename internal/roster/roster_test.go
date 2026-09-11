@@ -302,6 +302,17 @@ func TestLoadRejectsUnknownField(t *testing.T) {
 	}
 }
 
+// Hermes at the pin filters tools by toolset only, so a roster naming
+// individual tools would describe a restriction nothing enforces.
+func TestLoadRejectsDisabledToolsField(t *testing.T) {
+	_, err := variant(t, func(yaml string) string {
+		return strings.Replace(yaml, "  - name: euclid\n    tier: worker\n", "  - name: euclid\n    tier: worker\n    disabled_tools: [skill_manage]\n", 1)
+	})
+	if err == nil || !strings.Contains(err.Error(), "disabled_tools") {
+		t.Fatalf("want a disabled_tools rejection, got %v", err)
+	}
+}
+
 func TestValidateRejectsMissingMCPToolset(t *testing.T) {
 	r := load(t, "testdata/farm.yaml")
 	for i := range r.Agents {

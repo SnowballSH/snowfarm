@@ -25,7 +25,6 @@ var (
 	agentName       = regexp.MustCompile(`^[a-z][a-z0-9-]{1,15}$`)
 	reasoningLevels = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 	claudeToolsets  = []string{"terminal", "skills"}
-	workerNoTools   = []string{"skill_manage", "kanban_create", "kanban_link"}
 )
 
 func (r *Roster) Validate() error {
@@ -227,11 +226,6 @@ func validateKanbanReach(a Agent, fail func(string, ...any) error) []error {
 	}
 	if slices.Contains(a.DisabledToolsets, kanbanToolset) {
 		errs = append(errs, fail("disabled_toolsets must not list %q on a worker: it strips kanban_complete and the escalation terminators with it", kanbanToolset))
-	}
-	for _, tool := range workerNoTools {
-		if !slices.Contains(a.DisabledTools, tool) {
-			errs = append(errs, fail("disabled_tools must list %q on a worker", tool))
-		}
 	}
 	return errs
 }

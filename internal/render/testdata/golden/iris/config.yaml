@@ -10,8 +10,6 @@ providers:
     transport: chat_completions
 agent:
   reasoning_effort: low
-  disabled_tools:
-    - skill_manage
 auxiliary:
   approval:
     provider: modelgate

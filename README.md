@@ -68,7 +68,6 @@ agents:
     reasoning: xhigh
     toolsets: [kanban, terminal, file, web, memory, skills]
     skills: [farm-claude-code]
-    disabled_tools: [skill_manage, kanban_create, kanban_link]
     limits: {slice_mib: 2048, run_mib: 1792, cpu_percent: 150}
     env: [CLAUDE_CODE_OAUTH_TOKEN, FARM_MODELGATE_KEY]
     context_length: 400000
@@ -94,10 +93,11 @@ guard:
 
 The rules that matter most are the ones that keep an agent able to reach
 Claude Code and a worker able to terminate its own card: `terminal`, `skills`
-and `kanban` in the toolsets, `farm-claude-code` in the skills,
-`CLAUDE_CODE_OAUTH_TOKEN` in the environment names, and — on a worker — only
-`skill_manage`, `kanban_create` and `kanban_link` given up. `env` lists names,
-never values.
+and `kanban` in the toolsets, `farm-claude-code` in the skills, and
+`CLAUDE_CODE_OAUTH_TOKEN` in the environment names. `env` lists names, never
+values. The pinned Hermes filters tools by toolset only, so no roster field
+names individual tools; what a worker keeps, and what still bounds it, is in
+[`docs/roster.md`](docs/roster.md).
 
 Each agent's `SOUL.md` is two parts: the tier template every manager or worker
 shares, and `<soul_dir>/<agent>.md`, the agent-specific paragraphs the

@@ -228,6 +228,20 @@ The fallback runs whether or not the flags hold: the guard hashes both files
 for every agent against `/var/lib/snowfarm/profile-hashes.json`, and a read or
 hash *failure* is drift, not health.
 
+## Tools the profile cannot take away
+
+The pinned Hermes has no per-tool switch: `agent.disabled_toolsets` is the
+only filter it reads, and the rendered `config.yaml` carries no
+`disabled_tools` key because nothing would read it. So a worker keeps
+`skill_manage`, `kanban_create` and `kanban_link`, and what bounds them is
+this host's layout rather than the profile:
+
+| Control | What it covers | What it does not |
+|---|---|---|
+| the hygiene sweep's cross-created pass | a card whose `created_by` is a worker and whose assignee is another agent is blocked and reported | prevention; `created_by` is a column any board writer sets, and the pass runs every `guard.hygiene_interval` |
+| the frozen profile | `config.yaml` and `SOUL.md` are `root:farm-<agent>` and `+i`, so no skill edit reaches the model, provider or persona | `<profile>/skills/`, which is `farm-<agent>`-owned, outside the immutable set and outside the hash baseline |
+| the MCP server's own allow-list | the calendar server registers only the tools its `--enable-tools` argument names, so its write tools other than `create-event` and `create-events` do not exist in the session | `manage-accounts`, which that server registers outside the filter |
+
 ## Claude Code
 
 `farm-claude` is the only way an agent reaches Claude Code. Its directory, its

@@ -54,18 +54,17 @@ agents:
     reasoning: xhigh
     toolsets: [kanban, terminal, file, web, memory, vision, skills, mcp-google-calendar]
     skills: [farm-claude-code]
-    # The three tier tools every worker gives up, plus every WRITE tool the
-    # pinned google-calendar-mcp v2.6.3 exposes EXCEPT create-event and
-    # create-events. E4/F3 re-derives the write set from the pin as a
-    # completeness scan and corrects any name drift.
-    disabled_tools: [skill_manage, kanban_create, kanban_link, delete-event, update-event, respond-to-event, manage-accounts]
     limits: {slice_mib: 2048, run_mib: 1792, cpu_percent: 150}
     env: [CLAUDE_CODE_OAUTH_TOKEN, FARM_MODELGATE_KEY, FARM_SNOWBLOG_ADMIN_TOKEN, FARM_FILEBROWSER_TOKEN]
     allow_private_urls: true
     mcp_servers:
       - name: google-calendar
         command: /usr/bin/node
-        args: [/usr/local/lib/google-calendar-mcp/build/index.js]
+        # The allow-list the pinned google-calendar-mcp v2.6.3 honours at the
+        # server: its read tools plus create-event and create-events, so
+        # update-event, delete-event and respond-to-event are never registered.
+        # manage-accounts is registered outside the filter and stays.
+        args: [/usr/local/lib/google-calendar-mcp/build/index.js, --enable-tools, "list-calendars,list-events,search-events,get-event,list-colors,create-event,create-events,get-freebusy,get-current-time"]
         env: {GOOGLE_OAUTH_CREDENTIALS: /var/lib/farm/hestia/google/client.json, GOOGLE_CALENDAR_MCP_TOKEN_PATH: /var/lib/farm/hestia/google/tokens.json}
         version: "2.6.3"
         # The tarball sha256 is pinned by the F0 operator ceremony; the
@@ -82,7 +81,6 @@ agents:
     reasoning: xhigh
     toolsets: [kanban, terminal, file, web, memory, skills, mcp-grafana]
     skills: [farm-claude-code]
-    disabled_tools: [skill_manage, kanban_create, kanban_link]
     limits: {slice_mib: 2048, run_mib: 1792, cpu_percent: 150}
     env: [CLAUDE_CODE_OAUTH_TOKEN, FARM_MODELGATE_KEY, FARM_GRAFANA_READ_TOKEN, FARM_GITHUB_SNOWSYS_TOKEN, FARM_SNOWDEPLOY_TOKEN]
     allow_private_urls: true
@@ -105,7 +103,6 @@ agents:
     reasoning: xhigh
     toolsets: [kanban, terminal, file, web, memory, skills]
     skills: [farm-claude-code]
-    disabled_tools: [skill_manage, kanban_create, kanban_link]
     limits: {slice_mib: 2048, run_mib: 1792, cpu_percent: 150}
     env: [CLAUDE_CODE_OAUTH_TOKEN, FARM_MODELGATE_KEY, FARM_GITHUB_TEAMS_TOKEN]
     max_iterations: 80
@@ -119,7 +116,6 @@ agents:
     reasoning: xhigh
     toolsets: [kanban, terminal, file, web, memory, skills]
     skills: [farm-claude-code]
-    disabled_tools: [skill_manage, kanban_create, kanban_link]
     limits: {slice_mib: 2048, run_mib: 1792, cpu_percent: 150}
     env: [CLAUDE_CODE_OAUTH_TOKEN, FARM_MODELGATE_KEY, FARM_GITHUB_TEAMS_TOKEN]
     max_iterations: 80
@@ -133,7 +129,6 @@ agents:
     reasoning: xhigh
     toolsets: [kanban, terminal, file, web, memory, skills]
     skills: [farm-claude-code]
-    disabled_tools: [skill_manage, kanban_create, kanban_link]
     limits: {slice_mib: 2048, run_mib: 1792, cpu_percent: 150}
     env: [CLAUDE_CODE_OAUTH_TOKEN, FARM_MODELGATE_KEY, GITHUB_TOKEN]
     max_iterations: 80

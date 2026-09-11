@@ -3,7 +3,6 @@ package render
 import (
 	"bytes"
 	"path"
-	"slices"
 
 	"github.com/SnowballSH/snowfarm/internal/roster"
 	yaml "go.yaml.in/yaml/v3"
@@ -45,8 +44,6 @@ var (
 		"triage_specifier",
 		"vision",
 	}
-	managerDisabledTools = []string{"skill_manage"}
-	workerDisabledTools  = []string{"skill_manage", "kanban_create", "kanban_link"}
 	managerServerActions = []string{"fetch_messages"}
 )
 
@@ -83,7 +80,6 @@ type providerConfig struct {
 type agentConfig struct {
 	ReasoningEffort  string   `yaml:"reasoning_effort"`
 	DisabledToolsets []string `yaml:"disabled_toolsets,omitempty"`
-	DisabledTools    []string `yaml:"disabled_tools"`
 }
 
 type auxConfig struct {
@@ -187,7 +183,6 @@ func hermesConfigFor(r *roster.Roster, a roster.Agent) hermesConfig {
 		Agent: agentConfig{
 			ReasoningEffort:  a.Reasoning,
 			DisabledToolsets: a.DisabledToolsets,
-			DisabledTools:    disabledTools(a),
 		},
 		Auxiliary: auxiliary(),
 		Toolsets:  a.Toolsets,
@@ -221,20 +216,6 @@ func maxTokens(a roster.Agent) int {
 		return workerMaxTokens
 	}
 	return managerMaxTokens
-}
-
-func disabledTools(a roster.Agent) []string {
-	base := managerDisabledTools
-	if a.Tier == roster.TierWorker {
-		base = workerDisabledTools
-	}
-	out := slices.Clone(base)
-	for _, tool := range a.DisabledTools {
-		if !slices.Contains(out, tool) {
-			out = append(out, tool)
-		}
-	}
-	return out
 }
 
 func auxiliary() map[string]auxConfig {
