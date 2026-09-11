@@ -3,6 +3,7 @@ package render
 import (
 	"bytes"
 	"path"
+	"slices"
 
 	"github.com/SnowballSH/snowfarm/internal/roster"
 	yaml "go.yaml.in/yaml/v3"
@@ -42,11 +43,16 @@ var (
 		"triage_specifier",
 		"vision",
 	}
-	managerServerActions  = []string{"fetch_messages"}
-	rootToolsets          = []string{kanbanToolset}
-	platformBoundToolsets = map[string]string{
-		"discord":       platformDiscord,
-		"discord_admin": platformDiscord,
+	managerServerActions = []string{"fetch_messages"}
+	rootToolsets         = []string{kanbanToolset}
+
+	// platformBoundToolsets mirrors Hermes' _TOOLSET_PLATFORM_RESTRICTIONS
+	// (hermes_cli/toolset_scope.py at the pinned commit): a toolset named
+	// here runs on the platforms it lists and nowhere else, and one that is
+	// not named runs everywhere.
+	platformBoundToolsets = map[string][]string{
+		"discord":       {platformDiscord},
+		"discord_admin": {platformDiscord},
 	}
 )
 
@@ -226,7 +232,7 @@ func platformToolsetsFor(a roster.Agent) platformToolsets {
 func toolsetsOn(platform string, toolsets []string) []string {
 	out := make([]string, 0, len(toolsets))
 	for _, toolset := range toolsets {
-		if bound, ok := platformBoundToolsets[toolset]; ok && bound != platform {
+		if bound, restricted := platformBoundToolsets[toolset]; restricted && !slices.Contains(bound, platform) {
 			continue
 		}
 		out = append(out, toolset)

@@ -136,6 +136,9 @@ func TestHermesInvariants(t *testing.T) {
 			if platform != "discord" && slices.Contains(toolsets, any("discord")) {
 				t.Fatalf("%s: the discord toolset is bound to the discord platform; Hermes drops it from %s", a.Name, platform)
 			}
+			if platform == "discord" && slices.Contains(a.Toolsets, "discord") && !slices.Contains(toolsets, any("discord")) {
+				t.Fatalf("%s: the discord toolset is bound to the discord platform and must survive on it, or the gateway loses the tools the roster gave it", a.Name)
+			}
 		}
 		if fileNamed(files, "skills/farm-claude-code/SKILL.md") == nil {
 			t.Fatalf("%s: the farm-claude-code skill was not rendered", a.Name)
