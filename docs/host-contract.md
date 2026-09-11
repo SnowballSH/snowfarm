@@ -6,8 +6,9 @@ runs there, and the checks that prove a host still matches. Read it with
 every row is an assertion, not a description.
 
 Paths are the roster's defaults. A roster that moves `farm.home_root`,
-`farm.kanban_home`, `farm.claude_dir` or `farm.soul_dir` moves every row that
-quotes them; the fields are in [`roster.md`](roster.md).
+`farm.kanban_home`, `farm.claude_dir`, `farm.soul_dir` or
+`farm.hermes_checkout` moves every row that quotes them; the fields are in
+[`roster.md`](roster.md).
 
 ## Accounts
 
@@ -45,6 +46,8 @@ tools, `file` operations and Claude Code runs execute on the host as
 | `/var/lib/farm/<agent>/.hermes/profiles` | 0755 | `farm-<agent>:farm-<agent>` | **immutable** (`chattr +i`) |
 | `/var/lib/farm/<agent>/.hermes/profiles/<agent>` | 0750 | `farm-<agent>:farm-<agent>` | the profile: `config.yaml`, `SOUL.md`, `skills/`, `state.db` |
 | `/var/lib/farm/<agent>/.hermes/profiles/<agent>/logs` | 0750 | `farm-<agent>:farm-<agent>` | `gateway.log`, which the guard's breaker tails |
+| `/var/lib/farm/<agent>/.hermes/profiles/<agent>/skills` | 0750 | `root:farm-<agent>` | the rendered skills, one directory each; root's, so the agent reads them and creates nothing beside them |
+| `/var/lib/farm/<agent>/.hermes/profiles/<agent>/skills/<skill>` | 0750 | `root:farm-<agent>` | one rendered skill; root's write bit is what stops the agent unlinking or renaming the `SKILL.md` in it |
 | `/var/lib/farm/<manager>/.config/systemd/user` | 0750 | `farm-<manager>:farm-<manager>` | the gateway unit (managers only, with its two parents and `default.target.wants`) |
 
 ## Files `snowfarm apply` installs
@@ -57,9 +60,9 @@ tools, `file` operations and Claude Code runs execute on the host as
 | `/etc/systemd/system/snowfarm-guard.service` | 0644 | `root:root` | rendered from the roster's paths |
 | `/etc/systemd/system/user-<uid>.slice.d/50-snowfarm.conf` | 0644 | `root:root` | `MemoryMax`, `MemoryHigh` (85% of it), `MemorySwapMax=0`, `CPUQuota` |
 | `/usr/local/lib/snowfarm/limits/<agent>` | 0644 | `root:root` | `RUN_MEMORY_MAX`, `RUN_TASKS_MAX`, `RUN_MAX_ITERATIONS` (agents with `limits.run_mib`) |
-| `/var/lib/farm/<agent>/.hermes/profiles/<agent>/config.yaml` | 0640 | `root:farm-<agent>` | rendered; **immutable** |
+| `/var/lib/farm/<agent>/.hermes/profiles/<agent>/config.yaml` | 0640 | `root:farm-<agent>` | rendered; **immutable**. Its `platform_toolsets` carries the roster's toolsets under the platforms the tier runs on — `discord` and `cron` for a manager, `cli` for a worker — and its root `toolsets` is `[kanban]`, the orchestrator-tool gate |
 | `/var/lib/farm/<agent>/.hermes/profiles/<agent>/SOUL.md` | 0640 | `root:farm-<agent>` | rendered; **immutable** |
-| `/var/lib/farm/<agent>/.hermes/profiles/<agent>/skills/<skill>/SKILL.md` | 0600 | `farm-<agent>:farm-<agent>` | rendered from the supervisor's own skill bodies |
+| `/var/lib/farm/<agent>/.hermes/profiles/<agent>/skills/<skill>/SKILL.md` | 0640 | `root:farm-<agent>` | rendered from the supervisor's own skill bodies. No immutable flag: the two directories above it are root's, and `snowfarm plan` reports a skill whose content, mode or owner has moved |
 | `/var/lib/farm/<manager>/.config/systemd/user/hermes-gateway.service` | 0644 | `farm-<manager>:farm-<manager>` | rendered; a unit still carrying `pending-reconcile` is installed and **not** started |
 | `/var/lib/farm/<manager>/.config/systemd/user/default.target.wants/hermes-gateway.service` | symlink | `farm-<manager>:farm-<manager>` | enables the unit without `systemctl --user enable` |
 | `/var/lib/snowfarm/profile-hashes.json` | 0640 | `snowfarm:snowfarm` | the hygiene sweep's baseline: the sha256 of each agent's `config.yaml` and `SOUL.md` |
@@ -93,13 +96,14 @@ every ledger, counts the runs, and is the only writer of
 |---|---|---|---|
 | `/usr/local/bin/snowfarm`, `/usr/local/bin/farm-claude` | 0755 | `root:root` | this repository's two binaries, verified against `SHA256SUMS` |
 | `/usr/local/bin/hermes`, `/usr/local/bin/claude` | 0755 | `root:root` | the pinned Hermes and Claude Code |
+| `/usr/local/lib/hermes-agent` | — | `root:root` | `farm.hermes_checkout`: the editable Hermes checkout and its venv, which the bootstrap clones and checks out at the pinned commit. Its modes are git's and the venv's; the bootstrap then runs `chmod -R go-w` over the tree, so `find /usr/local/lib/hermes-agent -perm /022` prints nothing. Its `.git` must stay readable by `snowfarm`, which is what the pin-drift probe reads |
 | `/etc/snowfarm` | 0700 | `snowfarm` | everything the guard reads and no agent may |
 | `/etc/snowfarm/farm.yaml` | — | `snowfarm` | the roster |
 | `/etc/snowfarm/age.key` | 0400 | `snowfarm` | the identity that decrypts the secrets and the event log |
 | `/etc/snowfarm/secrets` | 0700 | `snowfarm` | the per-agent age files (a 0400 directory has no search bit) |
 | `/etc/snowfarm/secrets/<agent>.age` | 0400 | `snowfarm` | that agent's variables, encrypted |
 | `/etc/snowfarm/secrets/supervisor.age` | 0400 | `snowfarm` | the guard's own credentials — the supervisor bot token and its probe key. It is not a roster agent and no uid is served it |
-| `/etc/snowfarm/pins.yaml` | — | `snowfarm` | what the Hermes drift probe compares against |
+| `/etc/snowfarm/pins.yaml` | — | `snowfarm` | `hermes.commit`, the full forty-character hash the drift probe compares the checkout's `HEAD` against; an abbreviated value is a probe error, not a match, and leaves `snowfarm_pin_drift` at **2**, the value that means the probe could not compare. A missing file or an empty `hermes.commit` is the same 2: nothing was checked |
 | `/etc/snowfarm/soul` | 0755 | `root:root` | the persona directory, `farm.soul_dir` |
 | `/etc/snowfarm/soul/<agent>.md` | 0644 | `root:root` | that agent's persona paragraphs |
 
@@ -228,6 +232,21 @@ The fallback runs whether or not the flags hold: the guard hashes both files
 for every agent against `/var/lib/snowfarm/profile-hashes.json`, and a read or
 hash *failure* is drift, not health.
 
+## Tools the profile cannot take away
+
+The pinned Hermes has no per-tool switch: `agent.disabled_toolsets` is the
+only filter it reads, and the rendered `config.yaml` carries no
+`disabled_tools` key because nothing would read it. So a worker keeps
+`skill_manage`, `kanban_create` and `kanban_link`, and what bounds them is
+this host's layout rather than the profile:
+
+| Control | What it covers | What it does not |
+|---|---|---|
+| the hygiene sweep's cross-created pass | a card whose `created_by` is a worker and whose assignee is another agent is blocked and reported | prevention; `created_by` is a column any board writer sets, and the pass runs every `guard.hygiene_interval` |
+| the frozen profile | `config.yaml` and `SOUL.md` are `root:farm-<agent>` and `+i`, so no skill edit reaches the model, provider or persona | the rest of the profile directory, which the agent owns and writes |
+| the root-owned skills | every `SKILL.md` is `root:farm-<agent>` 0640 in `root:farm-<agent>` 0750 directories, so `skill_manage` cannot rewrite, unlink or rename one, and `snowfarm plan` reports a skill whose content, mode or owner has moved | `<profile>` itself, which the agent owns: it can rename `skills/` aside and build a tree of its own in its place. The skills carry no immutable flag and are not in the hygiene sweep's baseline, so `snowfarm plan` — not the five-minute sweep — is what reports that |
+| the MCP server's own allow-list | the calendar server registers only the tools its `--enable-tools` argument names, so its write tools other than `create-event` and `create-events` do not exist in the session | `manage-accounts`, which that server registers outside the filter |
+
 ## Claude Code
 
 `farm-claude` is the only way an agent reaches Claude Code. Its directory, its
@@ -264,7 +283,7 @@ write runs nothing reads.
 | Unit | Scope | Notes |
 |---|---|---|
 | `snowfarm-guard.service` | system | `Type=notify`, `User=snowfarm Group=farm-agents`, `SupplementaryGroups=systemd-journal`, `WatchdogSec=90`, `ProtectSystem=strict` with `ReadWritePaths=` covering `/var/lib/snowfarm /run/snowfarm /srv/snowfarm /var/lib/farm` and any roster path outside them. It carries no seccomp or namespace directive: `sudo` needs setuid, and such a directive makes the kernel drop the setuid bit. On a cold boot it waits up to **two minutes**, retrying every two seconds, for `farm.metrics_addr` to be assigned to an interface — `tailscaled` reports started before the tailnet address is up, and the unit's `StartLimitBurst=5` in `StartLimitIntervalSec=300` would otherwise stop the guard for good. Every other bind error still fails at once |
-| `hermes-gateway.service` | user, per manager | `Type=simple`, `NoNewPrivileges=true`, `UMask=0007`, `Restart=on-failure`, and the `DISCORD_*` allow-list the roster fixes |
+| `hermes-gateway.service` | user, per manager | `Type=simple`, `NoNewPrivileges=true`, `UMask=0007`, `Restart=on-failure`, and the `DISCORD_*` allow-list the roster fixes. A restart of this unit is the only session boundary the manager has: the pinned Hermes resets no gateway conversation on a schedule, and the rendered profile carries no `session_reset` key because none is read |
 | `user-<uid>.slice` drop-in | system | the ceiling on everything the agent runs |
 | `snowfarm-run-<agent>-<ns>.service` | user, transient | one dispatch or maintenance pass, started by `systemd-run --collect` with `ExitType=cgroup` and the agent's run limits |
 
@@ -321,7 +340,7 @@ Beyond that the guard runs only:
 | Command or request | Purpose |
 |---|---|
 | `journalctl --no-pager -o json --output-fields=MESSAGE,PRIORITY [--since @<epoch>] <user-unit matches>` | the exit status and output of one transient run unit |
-| `<farm.hermes_bin> version` | the Hermes pin-drift probe |
+| `git -c safe.directory=<farm.hermes_checkout> -C <farm.hermes_checkout> rev-parse HEAD` | the weekly Hermes pin-drift probe. The checkout is root-owned and the guard is not root, so `safe.directory` is passed on the command line — a protected scope git honours — rather than parsing a banner that never carried `HEAD`. `snowfarm_pin_drift` reads **0** when `HEAD` is the pinned commit, **1** when it is not, and **2** when the command could not answer — an absent checkout, one `snowfarm` cannot read, one that is not a git repository — which is also the value a registry carries before the first weekly pass. Nothing else in snowfarm touches this path, so 2 is the only signal that the checkout is wrong, and it is the reason to alert on anything other than 0 rather than on 1 alone |
 | `GET <farm.modelgate.api>/models`, with the supervisor's own key | the model-gateway liveness probe |
 | `POST https://oauth2.googleapis.com/token` | the weekly refresh-grant probe on a stored Google token |
 

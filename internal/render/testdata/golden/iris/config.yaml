@@ -1,7 +1,6 @@
 model:
   provider: custom:modelgate
   default: claude-opus-5
-  max_tokens: 16384
   context_length: 200000
 providers:
   modelgate:
@@ -10,8 +9,6 @@ providers:
     transport: chat_completions
 agent:
   reasoning_effort: low
-  disabled_tools:
-    - skill_manage
 auxiliary:
   approval:
     provider: modelgate
@@ -47,14 +44,26 @@ auxiliary:
     reasoning_effort: low
 toolsets:
   - kanban
-  - web
-  - file
-  - memory
-  - vision
-  - cronjob
-  - terminal
-  - discord
-  - skills
+platform_toolsets:
+  cron:
+    - kanban
+    - web
+    - file
+    - memory
+    - vision
+    - cronjob
+    - terminal
+    - skills
+  discord:
+    - kanban
+    - web
+    - file
+    - memory
+    - vision
+    - cronjob
+    - terminal
+    - discord
+    - skills
 terminal:
   backend: local
   cwd: /var/lib/farm/iris
@@ -80,8 +89,5 @@ secrets:
   command:
     enabled: true
     command: /usr/local/bin/snowfarm secret-env
-session_reset:
-  mode: daily
-  at_hour: 3
 approvals:
   mode: smart

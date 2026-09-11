@@ -13,12 +13,12 @@ type File struct {
 }
 
 const (
-	// The two files the agent must not own: C4 installs them root:farm-<agent>
-	// and then chattr +i, so a compromised agent cannot rewrite its own
-	// persona or reach a provider the roster did not give it.
-	rootOwnedMode  fs.FileMode = 0o640
-	agentOwnedMode fs.FileMode = 0o600
-	rootOwner                  = "root"
+	// Every file apply renders into a profile is the agent's to read and
+	// nobody's but root's to write: config.yaml and SOUL.md carry chattr +i
+	// on top, and the skills are held by the ownership of the directories
+	// they sit in.
+	rootOwnedMode fs.FileMode = 0o640
+	rootOwner                 = "root"
 )
 
 // IsSymlink reports whether the applier must create Path as a symlink to

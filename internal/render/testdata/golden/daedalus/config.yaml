@@ -1,7 +1,6 @@
 model:
   provider: custom:modelgate
   default: gpt-5.6-luna
-  max_tokens: 32768
   context_length: 400000
 providers:
   modelgate:
@@ -10,10 +9,6 @@ providers:
     transport: chat_completions
 agent:
   reasoning_effort: xhigh
-  disabled_tools:
-    - skill_manage
-    - kanban_create
-    - kanban_link
 auxiliary:
   approval:
     provider: modelgate
@@ -49,11 +44,14 @@ auxiliary:
     reasoning_effort: low
 toolsets:
   - kanban
-  - terminal
-  - file
-  - web
-  - memory
-  - skills
+platform_toolsets:
+  cli:
+    - kanban
+    - terminal
+    - file
+    - web
+    - memory
+    - skills
 terminal:
   backend: local
   cwd: /var/lib/farm/daedalus

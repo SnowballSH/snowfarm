@@ -86,10 +86,11 @@ func (c *calls) recordUser(args []string) {
 }
 
 // Lookup reports the test process's own uid for every user the fake useradd
-// created: the fake chown records its arguments and changes nothing, so a
-// path Apply chowned to farm-<agent> is still owned by whoever runs the test.
+// created, and for root, which every host already has: the fake chown records
+// its arguments and changes nothing, so a path Apply chowned to root or to
+// farm-<agent> is still owned by whoever runs the test.
 func (c *calls) Lookup(user string) (int, bool) {
-	if _, ok := c.users[user]; !ok {
+	if _, ok := c.users[user]; !ok && user != rootOwner {
 		return 0, false
 	}
 	return os.Getuid(), true
@@ -439,6 +440,7 @@ func TestPlanReportsDrift(t *testing.T) {
 	profile := filepath.Join(root, hestia.HermesHome(r.Farm))
 	config := filepath.Join(profile, "config.yaml")
 	soul := filepath.Join(profile, "SOUL.md")
+	skill := filepath.Join(profile, "skills", "farm-claude-code", "SKILL.md")
 	ledger := filepath.Join(root, r.Farm.ClaudeDir, "runs", "hestia.jsonl")
 	state := filepath.Join(root, "var/lib/snowfarm")
 
@@ -462,6 +464,13 @@ func TestPlanReportsDrift(t *testing.T) {
 			want:   "content",
 			break_: func(t *testing.T) { write(t, soul, "you are free\n", 0o640) },
 			fix:    func(t *testing.T) { write(t, soul, rendered(t, r, hestia, "SOUL.md"), 0o640) },
+		},
+		{
+			name:   "rewritten skill",
+			target: hestia.HermesHome(r.Farm) + "/skills/farm-claude-code/SKILL.md",
+			want:   "content",
+			break_: func(t *testing.T) { write(t, skill, "run claude code however you like\n", 0o640) },
+			fix:    func(t *testing.T) { write(t, skill, rendered(t, r, hestia, "SKILL.md"), 0o640) },
 		},
 		{
 			name:   "loosened guard state directory",
@@ -575,6 +584,58 @@ func TestPlanReportsAProfileAncestorTheAgentDoesNotOwn(t *testing.T) {
 	for _, target := range []string{
 		hestia.Home(r.Farm) + "/.hermes",
 		hestia.Home(r.Farm) + "/.hermes/profiles",
+	} {
+		if !slices.Contains(targets(p), target) {
+			t.Fatalf("plan does not report the owner of %s:\n%s", target, p)
+		}
+		if detail := detailOf(t, p, target); !strings.Contains(detail, "owner") {
+			t.Fatalf("%s: detail %q does not mention the owner", target, detail)
+		}
+	}
+}
+
+// The skills carry no immutable flag, so ownership is the whole control: the
+// files are root's and so are the directories holding them, which is what
+// stops skill_manage rewriting or unlinking the rules the farm renders.
+func TestApplyOwnsTheRenderedSkills(t *testing.T) {
+	_, r, c, root := applied(t)
+	for _, agent := range r.Agents {
+		skills := filepath.Join(root, agent.HermesHome(r.Farm), "skills")
+		assertMode(t, skills, 0o750)
+		assertChown(t, c, rootOwner+":"+agent.User(), skills)
+		for _, skill := range agent.Skills {
+			dir := filepath.Join(skills, skill)
+			assertMode(t, dir, 0o750)
+			assertChown(t, c, rootOwner+":"+agent.User(), dir)
+			assertMode(t, filepath.Join(dir, "SKILL.md"), 0o640)
+			assertChown(t, c, rootOwner+":"+agent.User(), filepath.Join(dir, "SKILL.md"))
+		}
+	}
+}
+
+// A skill file the agent has taken is drift the next plan reports, the way a
+// profile ancestor it owns is. The account database is what the check reads,
+// so shifting root's uid is how a test without root stages a file root no
+// longer owns.
+func TestPlanReportsASkillTheAgentOwns(t *testing.T) {
+	a, r, c, _ := applied(t)
+	a.Lookup = func(user string) (int, bool) {
+		uid, ok := c.Lookup(user)
+		if user == rootOwner {
+			return uid + 1, ok
+		}
+		return uid, ok
+	}
+	hestia, _ := r.Agent("hestia")
+	p, err := a.Plan(r, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := hestia.HermesHome(r.Farm)
+	for _, target := range []string{
+		profile + "/skills",
+		profile + "/skills/farm-claude-code",
+		profile + "/skills/farm-claude-code/SKILL.md",
 	} {
 		if !slices.Contains(targets(p), target) {
 			t.Fatalf("plan does not report the owner of %s:\n%s", target, p)

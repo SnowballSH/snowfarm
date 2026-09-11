@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"flag"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -75,15 +76,11 @@ func TestHermesGolden(t *testing.T) {
 				if !bytes.Equal(want, f.Content) {
 					t.Fatalf("%s differs from golden", rel)
 				}
-				wantOwner, wantMode := a.User(), fs.FileMode(0o600)
-				if rel == "config.yaml" || rel == "SOUL.md" {
-					wantOwner, wantMode = "root", fs.FileMode(0o640)
+				if f.Owner != rootOwner || f.Group != a.User() {
+					t.Fatalf("%s owner %s:%s, want %s:%s: an agent that owns a file apply renders can rewrite it", rel, f.Owner, f.Group, rootOwner, a.User())
 				}
-				if f.Owner != wantOwner || f.Group != a.User() {
-					t.Fatalf("%s owner %s:%s, want %s:%s", rel, f.Owner, f.Group, wantOwner, a.User())
-				}
-				if f.Mode.Perm() != wantMode {
-					t.Fatalf("%s mode %v, want %v", rel, f.Mode.Perm(), wantMode)
+				if f.Mode.Perm() != rootOwnedMode {
+					t.Fatalf("%s mode %v, want %v: the agent reads what apply rendered and writes none of it", rel, f.Mode.Perm(), rootOwnedMode)
 				}
 			}
 			for _, stale := range staleGoldens(t, filepath.Join("testdata", "golden", a.Name), rendered) {
@@ -112,25 +109,43 @@ func TestHermesInvariants(t *testing.T) {
 		if kanban["dispatch_in_gateway"] != false {
 			t.Fatalf("%s: dispatch must be disabled", a.Name)
 		}
-		toolsets := doc["toolsets"].([]any)
-		if !slices.Contains(toolsets, any("kanban")) {
-			t.Fatalf("%s: every agent needs the kanban toolset, or no card can terminate", a.Name)
+		if _, present := doc["model"].(map[string]any)["max_tokens"]; present {
+			t.Fatalf("%s: model.max_tokens has no reader at the pinned Hermes; the provider's default applies whatever is rendered", a.Name)
 		}
-		if !slices.Contains(toolsets, any("skills")) || !slices.Contains(toolsets, any("terminal")) {
-			t.Fatalf("%s: terminal and skills must both survive, or Claude Code is unreachable", a.Name)
+		if _, present := doc["session_reset"]; present {
+			t.Fatalf("%s: session_reset is legacy at the pinned Hermes and ignored; the restart window is the only session boundary", a.Name)
+		}
+		if root, _ := doc["toolsets"].([]any); !slices.Equal(root, []any{"kanban"}) {
+			t.Fatalf("%s: the root toolsets list is the gate for the orchestrator kanban tools and nothing else; got %v", a.Name, root)
+		}
+		platforms, _ := doc["platform_toolsets"].(map[string]any)
+		wantPlatforms := []string{"cli"}
+		if a.Tier == roster.TierManager {
+			wantPlatforms = []string{"cron", "discord"}
+		}
+		if got := slices.Sorted(maps.Keys(platforms)); !slices.Equal(got, wantPlatforms) {
+			t.Fatalf("%s: platform_toolsets names %v, but a %s runs on %v", a.Name, got, a.Tier, wantPlatforms)
+		}
+		for platform, raw := range platforms {
+			toolsets := raw.([]any)
+			for _, needed := range []any{"kanban", "terminal", "skills"} {
+				if !slices.Contains(toolsets, needed) {
+					t.Fatalf("%s: platform %s lacks %s, so Claude Code is unreachable or no card can terminate", a.Name, platform, needed)
+				}
+			}
+			if platform != "discord" && slices.Contains(toolsets, any("discord")) {
+				t.Fatalf("%s: the discord toolset is bound to the discord platform; Hermes drops it from %s", a.Name, platform)
+			}
+			if platform == "discord" && slices.Contains(a.Toolsets, "discord") && !slices.Contains(toolsets, any("discord")) {
+				t.Fatalf("%s: the discord toolset is bound to the discord platform and must survive on it, or the gateway loses the tools the roster gave it", a.Name)
+			}
 		}
 		if fileNamed(files, "skills/farm-claude-code/SKILL.md") == nil {
 			t.Fatalf("%s: the farm-claude-code skill was not rendered", a.Name)
 		}
 		agentCfg := doc["agent"].(map[string]any)
-		disabled := agentCfg["disabled_tools"].([]any)
-		if !slices.Contains(disabled, any("skill_manage")) {
-			t.Fatalf("%s: skill_manage must be disabled by name", a.Name)
-		}
-		wantsNoCreate := a.Tier == roster.TierWorker
-		hasNoCreate := slices.Contains(disabled, any("kanban_create")) && slices.Contains(disabled, any("kanban_link"))
-		if wantsNoCreate != hasNoCreate {
-			t.Fatalf("%s: kanban_create/kanban_link must be disabled on workers only", a.Name)
+		if _, present := agentCfg["disabled_tools"]; present {
+			t.Fatalf("%s: agent.disabled_tools has no reader at the pinned Hermes; rendering it promises a restriction that does not exist", a.Name)
 		}
 		term := doc["terminal"].(map[string]any)
 		if term["backend"] != "local" {

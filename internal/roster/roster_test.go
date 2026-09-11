@@ -92,7 +92,7 @@ func TestDefaultsAreConservative(t *testing.T) {
 	}
 	if r.Farm.HomeRoot != "/var/lib/farm" || r.Farm.KanbanHome != "/srv/snowfarm/kanban" ||
 		r.Farm.ClaudeDir != "/srv/snowfarm/claude" || r.Farm.HermesBin != "/usr/local/bin/hermes" ||
-		r.Farm.SoulDir != "/etc/snowfarm/soul" {
+		r.Farm.HermesCheckout != "/usr/local/lib/hermes-agent" || r.Farm.SoulDir != "/etc/snowfarm/soul" {
 		t.Fatalf("farm defaults: %+v", r.Farm)
 	}
 	if r.Farm.UIDBase != 6000 {
@@ -299,6 +299,26 @@ func TestLoadRejectsUnknownField(t *testing.T) {
 	}
 	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "max_claude_slot") {
 		t.Fatalf("want an unknown-field rejection, got %v", err)
+	}
+}
+
+// Hermes at the pin filters tools by toolset only, so a roster naming
+// individual tools would describe a restriction nothing enforces.
+func TestLoadRejectsDisabledToolsField(t *testing.T) {
+	_, err := variant(t, func(yaml string) string {
+		return strings.Replace(yaml, "  - name: euclid\n    tier: worker\n", "  - name: euclid\n    tier: worker\n    disabled_tools: [skill_manage]\n", 1)
+	})
+	if err == nil || !strings.Contains(err.Error(), "disabled_tools") {
+		t.Fatalf("want a disabled_tools rejection, got %v", err)
+	}
+}
+
+func TestLoadRejectsRelativeHermesCheckout(t *testing.T) {
+	_, err := variant(t, func(yaml string) string {
+		return strings.Replace(yaml, "  hermes_bin: /usr/local/bin/hermes\n", "  hermes_bin: /usr/local/bin/hermes\n  hermes_checkout: lib/hermes-agent\n", 1)
+	})
+	if err == nil || !strings.Contains(err.Error(), "farm.hermes_checkout") {
+		t.Fatalf("want a farm.hermes_checkout rejection, got %v", err)
 	}
 }
 

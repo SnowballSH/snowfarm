@@ -1,7 +1,6 @@
 model:
   provider: custom:modelgate
   default: gpt-5.6-luna
-  max_tokens: 32768
   context_length: 400000
 providers:
   modelgate:
@@ -10,14 +9,6 @@ providers:
     transport: chat_completions
 agent:
   reasoning_effort: xhigh
-  disabled_tools:
-    - skill_manage
-    - kanban_create
-    - kanban_link
-    - delete-event
-    - update-event
-    - respond-to-event
-    - manage-accounts
 auxiliary:
   approval:
     provider: modelgate
@@ -53,13 +44,16 @@ auxiliary:
     reasoning_effort: low
 toolsets:
   - kanban
-  - terminal
-  - file
-  - web
-  - memory
-  - vision
-  - skills
-  - mcp-google-calendar
+platform_toolsets:
+  cli:
+    - kanban
+    - terminal
+    - file
+    - web
+    - memory
+    - vision
+    - skills
+    - mcp-google-calendar
 terminal:
   backend: local
   cwd: /var/lib/farm/hestia
@@ -85,6 +79,8 @@ mcp_servers:
     command: /usr/bin/node
     args:
       - /usr/local/lib/google-calendar-mcp/build/index.js
+      - --enable-tools
+      - list-calendars,list-events,search-events,get-event,list-colors,create-event,create-events,get-freebusy,get-current-time
     env:
       GOOGLE_CALENDAR_MCP_TOKEN_PATH: /var/lib/farm/hestia/google/tokens.json
       GOOGLE_OAUTH_CREDENTIALS: /var/lib/farm/hestia/google/client.json

@@ -12,8 +12,7 @@ import (
 var skillFS embed.FS
 
 // Skills renders the skill bodies the roster gives the agent into its
-// profile. Hermes reaches them through skill_view, which is why the render
-// disables skill_manage by name rather than the whole skills toolset.
+// profile, where Hermes reaches them through skill_view.
 func Skills(a roster.Agent, home string) ([]File, error) {
 	files := make([]File, 0, len(a.Skills))
 	for _, name := range a.Skills {
@@ -23,8 +22,8 @@ func Skills(a roster.Agent, home string) ([]File, error) {
 		}
 		files = append(files, File{
 			Path:    path.Join(home, "skills", name, "SKILL.md"),
-			Mode:    agentOwnedMode,
-			Owner:   a.User(),
+			Mode:    rootOwnedMode,
+			Owner:   rootOwner,
 			Group:   a.User(),
 			Content: body,
 		})

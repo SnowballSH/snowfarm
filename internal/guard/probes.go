@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -44,6 +45,7 @@ const (
 	boardFileWAL = "wal"
 
 	noticePinDrift = "pin_drift"
+	gitBin         = "git"
 
 	// googleRefused is the one thing snowfarm_google_token_healthy says
 	// about a token: Google would not honour it. It is the value A5 alerts
@@ -56,7 +58,19 @@ const (
 	// refused, so an alert on zero fires on a real refusal rather than
 	// continuously on a farm whose consent ceremony has not happened yet.
 	googleTokenUnchecked = 1
+
+	// pinMatches and pinDrifted are the two answers snowfarm_pin_drift can
+	// give about the Hermes checkout. pinUnchecked is what it reports when
+	// there is no answer: no pin to read, or a pin and a checkout the probe
+	// could not compare. Zero is the value the gauge is born at and the one
+	// an operator reads as "the farm runs the pinned Hermes", so a probe
+	// that never looked may not report it.
+	pinMatches   = 0
+	pinDrifted   = 1
+	pinUnchecked = 2
 )
+
+var fullCommit = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 // Probes are the guard's outward checks: the model gateway every minute, the
 // manager units and the board's size on the health pass, and the Google
@@ -323,57 +337,76 @@ func (p *Probes) refreshGrant(ctx context.Context, id, secret, refresh string) (
 	return resp.StatusCode < http.StatusBadRequest, nil
 }
 
+// pin is what the weekly probe managed to read. A zero pinned field is the
+// probe saying it has nothing to compare, which is neither a match nor drift.
+type pin struct {
+	pinned    string
+	checkout  string
+	installed string
+}
+
 func (p *Probes) pinDrift(ctx context.Context) error {
-	if p.PinsPath == "" {
-		return nil
-	}
-	r := p.Roster.Load()
-	if r == nil {
-		return errors.New("probes: the guard holds no roster")
-	}
-	commit, err := pinnedCommit(p.PinsPath)
-	if errors.Is(err, fs.ErrNotExist) || (err == nil && commit == "") {
-		return nil
-	}
-	if err != nil {
+	found, err := p.readPin(ctx)
+	switch {
+	case err != nil, found.pinned == "":
+		p.Metrics.PinDrift.Set(pinUnchecked)
 		return err
-	}
-	installed, err := hermesVersion(ctx, r.Farm.HermesBin)
-	if err != nil {
-		return err
-	}
-	if carriesCommit(installed, commit) {
-		p.Metrics.PinDrift.Set(0)
+	case found.installed == found.pinned:
+		p.Metrics.PinDrift.Set(pinMatches)
 		return nil
 	}
-	p.Metrics.PinDrift.Set(1)
-	first, err := p.Ledger.NoticeOnce(noticePinDrift, commit+"/"+installed, p.now())
+	p.Metrics.PinDrift.Set(pinDrifted)
+	first, err := p.Ledger.NoticeOnce(noticePinDrift, found.pinned+"/"+found.installed, p.now())
 	if err != nil || !first {
 		return err
 	}
 	p.post(ctx, fmt.Sprintf(
-		"the installed Hermes reports %q, which does not carry the pinned commit %s; the farm is running something the pin does not describe",
-		installed, commit))
+		"the Hermes checkout at %s is at commit %s, not the pinned %s; the farm is running something the pin does not describe",
+		found.checkout, found.installed, found.pinned))
 	return nil
 }
 
-func hermesVersion(ctx context.Context, bin string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, bin, "version").Output() // #nosec G204 -- the path is the roster's own hermes_bin
-	if err != nil {
-		return "", fmt.Errorf("%s version: %w", bin, err)
+func (p *Probes) readPin(ctx context.Context) (pin, error) {
+	if p.PinsPath == "" {
+		return pin{}, nil
 	}
-	return strings.TrimSpace(string(out)), nil
+	r := p.Roster.Load()
+	if r == nil {
+		return pin{}, errors.New("probes: the guard holds no roster")
+	}
+	commit, err := pinnedCommit(p.PinsPath)
+	if errors.Is(err, fs.ErrNotExist) || (err == nil && commit == "") {
+		return pin{}, nil
+	}
+	if err != nil {
+		return pin{}, err
+	}
+	if !fullCommit.MatchString(commit) {
+		return pin{}, fmt.Errorf("%s: hermes.commit %q is not a full commit hash, so the checkout cannot be compared against it", p.PinsPath, commit)
+	}
+	checkout := r.Farm.HermesCheckout
+	installed, err := installedCommit(ctx, checkout)
+	if err != nil {
+		return pin{}, err
+	}
+	return pin{pinned: commit, checkout: checkout, installed: installed}, nil
 }
 
-// carriesCommit accepts the abbreviations a version string may print instead
-// of the whole hash.
-func carriesCommit(version, commit string) bool {
-	if strings.Contains(version, commit) {
-		return true
+// installedCommit reads HEAD from the checkout itself. The checkout is
+// root-owned and the guard is not, so safe.directory is passed on the command
+// line, a protected scope git honours.
+func installedCommit(ctx context.Context, checkout string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, gitBin, "-c", "safe.directory="+checkout, "-C", checkout, "rev-parse", "HEAD").Output() // #nosec G204 -- the path is the roster's own hermes_checkout
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && len(exit.Stderr) > 0 {
+			return "", fmt.Errorf("git -C %s rev-parse HEAD: %w: %s", checkout, err, strings.TrimSpace(string(exit.Stderr)))
+		}
+		return "", fmt.Errorf("git -C %s rev-parse HEAD: %w", checkout, err)
 	}
-	return len(commit) >= 12 && strings.Contains(version, commit[:12])
+	return strings.TrimSpace(string(out)), nil
 }
 
 func pinnedCommit(path string) (string, error) {

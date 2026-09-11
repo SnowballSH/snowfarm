@@ -25,7 +25,6 @@ var (
 	agentName       = regexp.MustCompile(`^[a-z][a-z0-9-]{1,15}$`)
 	reasoningLevels = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 	claudeToolsets  = []string{"terminal", "skills"}
-	workerNoTools   = []string{"skill_manage", "kanban_create", "kanban_link"}
 )
 
 func (r *Roster) Validate() error {
@@ -49,6 +48,9 @@ func (r *Roster) validateFarm() []error {
 	}
 	if !path.IsAbs(r.Farm.SoulDir) {
 		errs = append(errs, fmt.Errorf("farm.soul_dir %q must be an absolute path: apply reads each agent's persona from it", r.Farm.SoulDir))
+	}
+	if !path.IsAbs(r.Farm.HermesCheckout) {
+		errs = append(errs, fmt.Errorf("farm.hermes_checkout %q must be an absolute path: the pin-drift probe reads the installed commit from it", r.Farm.HermesCheckout))
 	}
 	if r.Farm.UIDBase < uidFloor {
 		errs = append(errs, fmt.Errorf("farm.uid_base is %d, below the floor %d the IMDS egress drop keys on", r.Farm.UIDBase, uidFloor))
@@ -227,11 +229,6 @@ func validateKanbanReach(a Agent, fail func(string, ...any) error) []error {
 	}
 	if slices.Contains(a.DisabledToolsets, kanbanToolset) {
 		errs = append(errs, fail("disabled_toolsets must not list %q on a worker: it strips kanban_complete and the escalation terminators with it", kanbanToolset))
-	}
-	for _, tool := range workerNoTools {
-		if !slices.Contains(a.DisabledTools, tool) {
-			errs = append(errs, fail("disabled_tools must list %q on a worker", tool))
-		}
 	}
 	return errs
 }
