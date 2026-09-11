@@ -96,7 +96,7 @@ every ledger, counts the runs, and is the only writer of
 |---|---|---|---|
 | `/usr/local/bin/snowfarm`, `/usr/local/bin/farm-claude` | 0755 | `root:root` | this repository's two binaries, verified against `SHA256SUMS` |
 | `/usr/local/bin/hermes`, `/usr/local/bin/claude` | 0755 | `root:root` | the pinned Hermes and Claude Code |
-| `/usr/local/lib/hermes-agent` | `go-w` | `root:root` | `farm.hermes_checkout`: the editable Hermes checkout and its venv, which the bootstrap clones and checks out at the pinned commit. Its `.git` must stay readable by `snowfarm`, which is what the pin-drift probe reads |
+| `/usr/local/lib/hermes-agent` | — | `root:root` | `farm.hermes_checkout`: the editable Hermes checkout and its venv, which the bootstrap clones and checks out at the pinned commit. Its modes are git's and the venv's; the bootstrap then runs `chmod -R go-w` over the tree, so `find /usr/local/lib/hermes-agent -perm /022` prints nothing. Its `.git` must stay readable by `snowfarm`, which is what the pin-drift probe reads |
 | `/etc/snowfarm` | 0700 | `snowfarm` | everything the guard reads and no agent may |
 | `/etc/snowfarm/farm.yaml` | — | `snowfarm` | the roster |
 | `/etc/snowfarm/age.key` | 0400 | `snowfarm` | the identity that decrypts the secrets and the event log |
