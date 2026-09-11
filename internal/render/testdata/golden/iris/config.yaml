@@ -1,7 +1,6 @@
 model:
   provider: custom:modelgate
   default: claude-opus-5
-  max_tokens: 16384
   context_length: 200000
 providers:
   modelgate:

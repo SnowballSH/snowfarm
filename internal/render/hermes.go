@@ -27,11 +27,6 @@ const (
 	toolProgress    = "log"
 	secretsHelper   = "/usr/local/bin/snowfarm secret-env"
 
-	// max_tokens caps reasoning and answer together on both upstreams, so the
-	// xhigh workers get twice the manager budget.
-	managerMaxTokens = 16384
-	workerMaxTokens  = 32768
-
 	sessionResetMode   = "daily"
 	sessionResetHour   = 3
 	maxInProgress      = 1
@@ -78,7 +73,6 @@ type hermesConfig struct {
 type modelConfig struct {
 	Provider      string `yaml:"provider"`
 	Default       string `yaml:"default"`
-	MaxTokens     int    `yaml:"max_tokens"`
 	ContextLength int    `yaml:"context_length"`
 }
 
@@ -189,7 +183,6 @@ func hermesConfigFor(r *roster.Roster, a roster.Agent) hermesConfig {
 		Model: modelConfig{
 			Provider:      modelProvider,
 			Default:       a.Model,
-			MaxTokens:     maxTokens(a),
 			ContextLength: a.ContextLength,
 		},
 		Providers: map[string]providerConfig{providerKey: {
@@ -227,13 +220,6 @@ func hermesConfigFor(r *roster.Roster, a roster.Agent) hermesConfig {
 		config.SessionReset = &sessionResetConfig{Mode: sessionResetMode, AtHour: sessionResetHour}
 	}
 	return config
-}
-
-func maxTokens(a roster.Agent) int {
-	if a.Tier == roster.TierWorker {
-		return workerMaxTokens
-	}
-	return managerMaxTokens
 }
 
 func platformToolsetsFor(a roster.Agent) platformToolsets {

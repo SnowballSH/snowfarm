@@ -113,6 +113,9 @@ func TestHermesInvariants(t *testing.T) {
 		if kanban["dispatch_in_gateway"] != false {
 			t.Fatalf("%s: dispatch must be disabled", a.Name)
 		}
+		if _, present := doc["model"].(map[string]any)["max_tokens"]; present {
+			t.Fatalf("%s: model.max_tokens has no reader at the pinned Hermes; the provider's default applies whatever is rendered", a.Name)
+		}
 		if root, _ := doc["toolsets"].([]any); !slices.Equal(root, []any{"kanban"}) {
 			t.Fatalf("%s: the root toolsets list is the gate for the orchestrator kanban tools and nothing else; got %v", a.Name, root)
 		}

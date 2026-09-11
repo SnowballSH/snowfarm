@@ -1,7 +1,6 @@
 model:
   provider: custom:modelgate
   default: gpt-5.6-sol
-  max_tokens: 16384
   context_length: 400000
 providers:
   modelgate:
