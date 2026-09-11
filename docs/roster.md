@@ -183,8 +183,8 @@ nothing — so every worker keeps `skill_manage`, `kanban_create` and
 terminate a card. What bounds those three is not the profile:
 
 - A card a worker creates for another agent is caught by the guard's hygiene
-  sweep, which blocks it and reports it in `#farm-control`. That is detection
-  on a five-minute cadence, not prevention.
+  sweep, which blocks it and reports it in `#farm-status`. That is detection,
+  once every `guard.hygiene_interval`, not prevention.
 - `config.yaml` and `SOUL.md` are root-owned and immutable, so `skill_manage`
   cannot reach the model, the provider or the persona. The `skills/` directory
   itself is the agent's own, and nothing removes or hashes a skill a worker
